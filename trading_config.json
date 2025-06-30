@@ -1,0 +1,23 @@
+{
+  "symbols": [260105],
+  "name_symbol": "NIFTY 50",
+  "api_key": "YOUR_API_KEY",
+  "api_secret": "YOUR_API_SECRET",
+  "access_token": "",  
+  "paper_trade": true,
+  "instrument_config": {
+    "NIFTY 50": {
+      "symbol": "NIFTY24JULFUT",
+      "step": [0.02, 0.04, 0.06],
+      "trail": [0.01, 0.02, 0.03]
+    }
+  },
+  "execution": {
+    "delta1": 0.1,
+    "delta2": 0.2,
+    "quantities": {
+      "default": 50,
+      "NIFTY24JULFUT": 25
+    }
+  }
+}
