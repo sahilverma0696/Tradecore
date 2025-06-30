@@ -18,11 +18,8 @@ def build():
 
     candle_maker = CandleMaker()
     order_mgr = OrderManager()
-    exit_mgr = ExitManager(order_mgr)
 
-    # --- Handlers chain ---
-    candle_maker.register_handler(SignalManager(order_mgr, cfg['instrument_config']).handle_candle)
-
+    # --- streamer first ---
     streamer = ZerodhaStreamer(
         symbols=[int(s) for s in cfg['symbols']],
         api_key=cfg['api_key'],
@@ -33,6 +30,13 @@ def build():
     streamer.register_handler(candle_maker.handle_quote)
     streamer.register_handler(exit_mgr.handle_quote)
     streamer.init_kite(cfg.get('access_token'))
+
+    # Executioner now that kite is ready
+    execer = Executioner(kite_client=streamer.get_kite(), paper_trade=cfg.get('paper_trade', True))
+    order_mgr.on_order_created = lambda name, order, timestamp: execer.place_market(order.instrument, order.side)
+    # inject execer into exit_mgr
+    exit_mgr.executioner = execer
+
     streamer.start()
 
     LOGGER.info("System initialised – streaming started")

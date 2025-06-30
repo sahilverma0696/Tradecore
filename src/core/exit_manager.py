@@ -3,8 +3,9 @@ from src.logger_factory import get_logger
 
 class ExitManager:
     """Implements RISK / RETRACE exits based on VWAP, step and trail."""
-    def __init__(self, order_manager):
+    def __init__(self, order_manager, executioner=None):
         self.order_manager = order_manager
+        self.executioner = executioner
         self._logger = get_logger("ExitManager")
         self._callback = None  # external exit handler
 
@@ -57,4 +58,8 @@ class ExitManager:
                 self._callback(order, reason)
             except Exception as e:
                 self._logger.error(f"exit callback error: {e}")
+        # send market exit on opposite side
+        if self.executioner:
+            side = 'SELL' if order.get_side() == 'BUY' else 'BUY'
+            self.executioner.place_market(order.get_instrument(), side)
         self.order_manager.remove_order(order.get_name(), ts, reason, exit_price)

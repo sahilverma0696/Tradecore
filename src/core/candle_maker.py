@@ -22,12 +22,13 @@ class CandleMaker:
             self._handlers.append(cb)
 
     # ------------------------------------------------------------------
+    # update the fields according to how data is updated from zerodha quotes
     def handle_quote(self, quote: dict):
         ts: datetime = quote['ts']
         inst = quote['inst']
         name = quote['name']
         ltp = quote['ltp']
-        vol = quote.get('ltq', 0)
+        vol = quote.get('ltq') or quote.get('last_quantity') or quote.get('volume') or 0
         candle_time = ts.replace(second=0, microsecond=0)
         candle_time = candle_time.replace(minute=(candle_time.minute // 5) * 5)
         current = self._current.get(inst)

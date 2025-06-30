@@ -9,8 +9,8 @@ class OrderObject:
         self.step = step or []
         self.trail = trail or []
         self.current_step_idx = 0
-        self.current_step = self.step[0] if self.step else 0.0
-        self.current_trail = self.trail[0] if self.trail else 0.0
+        self.current_step = self.step[0] if self.step else 0.7
+        self.current_trail = self.trail[0] if self.trail else 0.1
         self.current_candle = candle
         self.ltp = 0
         self.position_size = 1.0

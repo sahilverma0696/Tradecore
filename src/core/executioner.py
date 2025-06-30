@@ -16,8 +16,6 @@ class Executioner:
     # ------------------------------------------------------------------
     def _set_cfg(self, cfg):
         exec_cfg = cfg.get('execution', {})
-        self._delta1 = exec_cfg.get('delta1', 0.1)
-        self._delta2 = exec_cfg.get('delta2', 0.2)
         self._quantities = exec_cfg.get('quantities', {'default': 1})
 
     def _on_cfg(self, cfg):

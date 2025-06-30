@@ -1,0 +1,3 @@
+- Modify ZerodhaStreamer on tick according to data coming https://kite.trade/docs/pykiteconnect/v4/#kiteconnect.KiteTicker
+- KiteConnect, use optimally, has reconnect methods and other things as well
+- Set the code to sleep and start at 9:15 am

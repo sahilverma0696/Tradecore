@@ -7,7 +7,7 @@ from typing import Callable, Dict, List
 from src.logger_factory import get_logger
 
 CONFIG_FILE = "trading_config.json"
-POLL_INTERVAL = 2  # seconds
+POLL_INTERVAL = 10  # seconds
 
 class ConfigManager:
     """File-polling JSON config loader with callback support."""

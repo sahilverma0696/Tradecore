@@ -49,29 +49,47 @@ class ZerodhaStreamer:
         self._exec = Executioner(self._kite, paper_trade=self._paper, logger=self._logger)
 
     # ------------------------------------------------------------------
-    def start(self):
-        self._ticker = KiteTicker(self.api_key, self._kite.access_token)
+    def get_kite(self):
+        return self._kite
 
-        def on_ticks(ws, ticks):
-            for t in ticks:
-                tok = t['instrument_token']
-                if tok not in self.symbols:
-                    continue
-                price = float(t['last_price'])
-                ts = t.get('exchange_timestamp') or datetime.now()
-                quote = {
-                    'ts': ts,
-                    'inst': tok,
-                    'name': self.name_symbol,
-                    'ltp': price,
-                    'ltq': t.get('last_quantity', 0),
-                    'cp': t.get('change', None),
-                }
-                for cb in self._handlers:
+    # ------------------------------------------------------------------
+    def _on_ticks(self, ws, ticks):
+        for t in ticks:
+            tok = t['instrument_token']
+            if tok not in self.symbols:
+                continue
+            price = float(t['last_price'])
+            ts = t.get('timestamp') or t.get('exchange_timestamp') or datetime.now()
+            quote = {
+                'ts': ts,
+                'inst': tok,
+                'name': self.name_symbol,
+                'ltp': price,
+                'last_quantity': t.get('last_quantity', 0),
+                'volume': t.get('volume', 0),
+                'change': t.get('change')
+            }
+            for cb in self._handlers:
+                try:
                     cb(quote)
-        def on_connect(ws, _):
-            ws.subscribe(self.symbols)
-            ws.set_mode(ws.MODE_FULL, self.symbols)
-        self._ticker.on_ticks = on_ticks
-        self._ticker.on_connect = on_connect
+                except Exception as e:
+                    self._logger.error(f"handler error: {e}")
+
+    def _on_connect(self, ws, response):
+        self._logger.info("Ticker connected. Subscribing to symbols ...")
+        ws.subscribe(self.symbols)
+        ws.set_mode(ws.MODE_FULL, self.symbols)
+
+    def _on_close(self, ws, code, reason):
+        self._logger.warning(f"Ticker closed: {code} {reason}")
+        ws.stop()
+
+    def start(self):
+        if not self._kite:
+            raise RuntimeError("call init_kite() first")
+        self._ticker = KiteTicker(self.api_key, self._kite.access_token)
+        self._ticker.on_ticks = self._on_ticks
+        self._ticker.on_connect = self._on_connect
+        self._ticker.on_close = self._on_close
+        self._logger.info("Starting ticker thread ...")
         threading.Thread(target=self._ticker.connect, daemon=True).start()

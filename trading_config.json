@@ -13,8 +13,7 @@
     }
   },
   "execution": {
-    "delta1": 0.1,
-    "delta2": 0.2,
+
     "quantities": {
       "default": 50,
       "NIFTY24JULFUT": 25
