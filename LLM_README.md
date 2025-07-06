@@ -49,7 +49,8 @@ This is an algorithmic trading system implementing a VWAP (Volume Weighted Avera
    `OrderManager` creates and tracks `OrderObject` instances for each symbol, logs entries/exits.
 
 6. **Execution**:  
-   `Executioner` places orders via KiteConnect or simulates them (paper trade).
+   `Execute` (in `src/core/executioner.py`) places all orders (entries and exits) via KiteConnect or simulates them (paper trade).  
+   All order placement is routed through this class.
 
 7. **Quote Database**:  
    `QuoteDatabase` persists all tick data to SQLite for later analysis/backtesting.
@@ -123,7 +124,7 @@ python3 -m unittest tests/test_vwap_flow.py
 
 ## Deprecated
 
-- `src/core/signal_manager.py` and `src/core/exit_manager.py` are not used; all logic is in `vwap_strategy.py`.
+- `src/core/signal_manager.py` and `src/core/exit_manager.py` are not used; all logic is in `vwap_strategy.py` and order placement is routed through `Execute`.
 
 ---
 

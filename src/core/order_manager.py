@@ -14,11 +14,19 @@ class OrderManager:
         self.on_order_created = None  # callback(name, order, timestamp)
 
     # ------------------------------------------------------------------
-    def create_order(self, timestamp: datetime, name: str, instrument: str, step, trail, side: str, candle=None):
-        if name in self._orders:
-            self._logger.warning(f"Order {name} already exists")
-            return self._orders[name]
+    def create_order(self, timestamp: datetime, name: str, instrument: str, step, trail, side: str, candle=None, quantity=None):
+        # Ensure only one direction per instrument
+        existing_order = self._orders.get(name)
+        if existing_order:
+            if existing_order.get_side() != side:
+                # Remove existing order before new direction
+                self.remove_order(name, timestamp, "DIRECTION_SWITCH", candle['close'] if candle else 0)
+            else:
+                self._logger.warning(f"Order {name} already exists with same direction")
+                return existing_order
         order = OrderObject(name, instrument, step, trail, side, candle)
+        if quantity is not None:
+            order.quantity = quantity
         self._orders[name] = order
         self._logger.info(f"Created order {name}")
         self._order_logger.log_entry(order)

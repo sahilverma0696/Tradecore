@@ -148,7 +148,12 @@ class VwapStrategy:
     
     def _enter_position(self, symbol: str, side: str, price: float, 
                        candle: dict, vwap: float):
-        """Enter a new position."""
+        """Enter a new position. Ensure only one direction at a time."""
+        # If position exists and direction is opposite, remove it
+        if symbol in self.positions:
+            existing = self.positions[symbol]
+            if existing['side'] != side:
+                self.positions.pop(symbol, None)
         total_qty = self.default_quantity
         self.positions[symbol] = {
             'side': side,

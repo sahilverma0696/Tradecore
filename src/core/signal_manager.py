@@ -1,4 +1,4 @@
-"""SignalManager copied from reference with updated imports."""
+# Deprecated: All signal logic is now in vwap_strategy.py. This file is no longer used.
 from src.logger_factory import get_logger
 from src.core.order_manager import OrderManager
 

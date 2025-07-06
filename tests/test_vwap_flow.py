@@ -38,7 +38,7 @@ class TestVWAPFlow(unittest.TestCase):
         self.assertEqual(pos['entry_price'], self.candle['close'])
 
         # Simulate order creation in order manager
-        self.order_mgr.create_order(
+        order = self.order_mgr.create_order(
             timestamp=pos['entry_time'],
             name=self.symbol,
             instrument="TESTSYM",
@@ -49,6 +49,22 @@ class TestVWAPFlow(unittest.TestCase):
             quantity=pos['quantity']
         )
         self.assertTrue(self.order_mgr.has_order(self.symbol))
+
+        # Simulate order placement via Execute (mock)
+        class DummyClient:
+            def place_order(self, **kwargs):
+                return True
+            VARIETY_REGULAR = "regular"
+            EXCHANGE_NFO = "NFO"
+            TRANSACTION_TYPE_BUY = "BUY"
+            TRANSACTION_TYPE_SELL = "SELL"
+            ORDER_TYPE_MARKET = "MARKET"
+            PRODUCT_MIS = "MIS"
+        from src.core.executioner import Execute
+        execer = Execute(logger=None, excel_logger=None, expiry=None, client=DummyClient())
+        direction = "B" if order.get_side() == "BUY" else "S"
+        result = execer.execute_order(order.instrument, direction, pos['entry_time'])
+        self.assertTrue(result)
 
         # Simulate a quote that triggers a step exit
         step_exit_price = pos['entry_price'] * (1 + 0.02)

@@ -54,8 +54,14 @@ vwap/
 
 To run the main trading bot from the `vwap` directory:
 ```bash
-make run
+python3 -m src.main
 ```
+or
+```bash
+python -m src.main
+```
+
+All order entries and exits are routed through the `Execute` class, which handles order placement, retry logic, and logging.
 
 To run all tests:
 ```bash
