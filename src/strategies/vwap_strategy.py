@@ -26,28 +26,26 @@ class Trade:
 
 class IncrementalVWAP:
     def __init__(self):
-        self.cum_tp_vol = 0.0
+        self.cum_pv = 0.0  # Cumulative price * volume
         self.cum_vol = 0.0
         self.vwap = None
 
     def update(self, high: float, low: float, close: float, volume: float) -> float:
-        typical_price = (high + low + close) / 3
-        tp_vol = typical_price * volume
-
-        self.cum_tp_vol += tp_vol
+        # VWAP = sum(close * volume) / sum(volume)
+        self.cum_pv += close * volume
         self.cum_vol += volume
 
         if self.cum_vol > 0:
-            self.vwap = round(self.cum_tp_vol / self.cum_vol, 2)
+            self.vwap = round(self.cum_pv / self.cum_vol, 2)
         return self.vwap
 
     def update_from_quote(self, ltp: float, volume: float) -> float:
-        tp_vol = ltp * volume
-        self.cum_tp_vol += tp_vol
+        # For tick data, use ltp * volume
+        self.cum_pv += ltp * volume
         self.cum_vol += volume
 
         if self.cum_vol > 0:
-            self.vwap = round(self.cum_tp_vol / self.cum_vol, 2)
+            self.vwap = round(self.cum_pv / self.cum_vol, 2)
         return self.vwap
 
 class VwapStrategy:
@@ -321,5 +319,7 @@ class VwapStrategy:
         return self.positions
     
     def get_completed_trades(self) -> List[Trade]:
+        """Get all completed trades."""
+        return self.completed_trades
         """Get all completed trades."""
         return self.completed_trades
