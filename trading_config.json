@@ -3,7 +3,7 @@
   "name_symbol": "NIFTY 50",
   "api_key": "YOUR_API_KEY",
   "api_secret": "YOUR_API_SECRET",
-  "access_token": "",  
+  "access_token": "",
   "paper_trade": true,
   "instrument_config": {
     "NIFTY 50": {
@@ -13,10 +13,26 @@
     }
   },
   "execution": {
-
     "quantities": {
-      "default": 50,
+      "default": 75,
       "NIFTY24JULFUT": 25
-    }
-  }
+    },
+    "delta1": 0.02,
+    "delta2": 0.04,
+    "max_retries": 3,
+    "retry_delay": 1
+  },
+  "exit_steps": [
+    [0.02, 0.3],
+    [0.04, 0.3],
+    [0.05, 0.3],
+    [0.07, 0.3],
+    [0.1, 0.3],
+    [0.15, 0.3],
+    [0.2, 0.3],
+    [0.3, 0.3]
+  ],
+  "exit_max_pct": 0.01,
+  "market_close_time": "13:39",
+  "default_quantity": 75
 }

@@ -54,27 +54,29 @@ class VwapStrategy:
     """VWAP cross strategy with integrated position and risk management."""
     
     def __init__(self, 
-                 exit_steps: List[Tuple[float, float]] = None, 
-                 exit_max_pct: float = 0.01,
-                 market_close_time: str = '13:39',
+                 config: dict = None,
                  output_file: str = 'trades.csv'):
         """
         Initialize the VWAP strategy.
         
         Args:
-            exit_steps: List of tuples (profit_pct, position_portion) for scaling out
-            exit_max_pct: Maximum retracement before trailing stop triggers
-            market_close_time: Time to close all positions (format: 'HH:MM')
+            config: Configuration dictionary (from trading_config.json)
             output_file: CSV file to save trade records
         """
         self._logger = get_logger("VWAPStrategy")
         self.vwaps = defaultdict(IncrementalVWAP)
-        self.exit_steps = exit_steps or [
+        config = config or {}
+
+        # Read from config
+        self.exit_steps = config.get('exit_steps', [
             (0.02, 0.3), (0.04, 0.3), (0.05, 0.3), (0.07, 0.3),
             (0.10, 0.3), (0.15, 0.3), (0.20, 0.3), (0.30, 0.3)
-        ]
-        self.market_close = datetime.strptime(market_close_time, "%H:%M").time()
-        self.exit_max_pct = exit_max_pct
+        ])
+        self.market_close = datetime.strptime(
+            config.get('market_close_time', '13:39'), "%H:%M"
+        ).time()
+        self.exit_max_pct = config.get('exit_max_pct', 0.01)
+        self.default_quantity = config.get('default_quantity', 75)
         self.output_file = output_file
         
         # Active trades
@@ -83,7 +85,8 @@ class VwapStrategy:
         
         # Initialize output file
         self._init_output_file()
-    
+        self._logger.info("VWAPStrategy initialized")
+
     def _init_output_file(self):
         """Initialize the output CSV file with headers."""
         with open(self.output_file, 'w', newline='') as f:
@@ -94,39 +97,49 @@ class VwapStrategy:
                 'exit_time', 'exit_price', 'exit_type',
                 'pnl', 'pnl_pct'
             ])
-    
+        self._logger.info(f"Initialized trade output file: {self.output_file}")
+
     def _record_trade(self, trade: Trade):
         """Save a completed trade to the output file."""
         self.completed_trades.append(trade)
         with open(self.output_file, 'a', newline='') as f:
             writer = csv.DictWriter(f, fieldnames=vars(trade).keys())
             writer.writerow(asdict(trade))
-    
+        self._logger.info(f"Recorded trade: {trade}")
+
     def on_candle(self, symbol: str, candle: dict):
-        """Process a new candle."""
+        """Process a new candle and handle entry/exit logic."""
         vwap = self.vwaps[symbol].update(
             candle['high'], candle['low'], candle['close'], candle['volume']
         )
-        
+
         now_time = candle['timestamp'].time()
         close_price = candle['close']
         open_price = candle['open']
-        
-        # Check for entry signals if no position exists
+
+        # ENTRY LOGIC: Crossover
         if symbol not in self.positions:
-            self._check_entry(symbol, candle, open_price, close_price, vwap)
+            # BUY: open below vwap, close above vwap
+            if open_price < vwap and close_price > vwap:
+                self._enter_position(symbol, 'BUY', close_price, candle, vwap)
+            # SELL: open above vwap, close below vwap
+            elif open_price > vwap and close_price < vwap:
+                self._enter_position(symbol, 'SELL', close_price, candle, vwap)
         else:
-            # Manage existing position
+            # EXIT LOGIC: Step, Trail, Time
             self._manage_position(symbol, close_price, vwap, now_time, candle['timestamp'])
-    
+
+        self._logger.debug(f"on_candle: {symbol} {candle}")
+
     def on_quote(self, symbol: str, ltp: float, volume: float, timestamp: datetime):
-        """Process a new quote (tick data)."""
+        """Process a new quote (tick data) and handle risk exits."""
         vwap = self.vwaps[symbol].update_from_quote(ltp, volume)
-        
-        # Check for risk exits on tick data
+        # RISK EXIT LOGIC: Safety and VWAP-based
         if symbol in self.positions:
             self._check_risk_exit(symbol, ltp, vwap, timestamp)
-    
+
+        self._logger.debug(f"on_quote: {symbol} ltp={ltp} volume={volume} ts={timestamp}")
+
     def _check_entry(self, symbol: str, candle: dict, open_price: float, 
                     close_price: float, vwap: float):
         """Check for entry signals."""
@@ -138,6 +151,7 @@ class VwapStrategy:
     def _enter_position(self, symbol: str, side: str, price: float, 
                        candle: dict, vwap: float):
         """Enter a new position."""
+        total_qty = self.default_quantity
         self.positions[symbol] = {
             'side': side,
             'entry_price': price,
@@ -147,12 +161,14 @@ class VwapStrategy:
             'max_profit_price': price,
             'min_profit_price': price,
             'position_size': 1.0,
+            'quantity': total_qty,
+            'remaining_qty': total_qty,
             'name': candle.get('name', symbol),
             'entry_open': candle['open'],
             'entry_close': candle['close'],
             'entry_vwap': vwap
         }
-        self._logger.info(f"ENTER {side} {symbol} @ {price}")
+        self._logger.info(f"ENTER {side} {symbol} @ {price} qty={total_qty}")
     
     def _manage_position(self, symbol: str, price: float, vwap: float, 
                         current_time: datetime, timestamp: datetime):
@@ -160,98 +176,118 @@ class VwapStrategy:
         position = self.positions[symbol]
         entry = position['entry_price']
         side = position['side']
-        
-        # Update price extremes
+
+        # Update price extremes for trailing logic
         if side == 'BUY':
             position['max_profit_price'] = max(position['max_profit_price'], price)
         else:
             position['min_profit_price'] = min(position['min_profit_price'], price)
-        
-        # Check for step exits
-        self._check_step_exits(symbol, price, position)
-        
-        # Check for trailing stop
+
+        # STEP EXIT: Partial profit taking at predefined levels
+        self._check_step_exits(symbol, price, position, timestamp)
+
+        # TRAIL EXIT: Trailing stop based on max/min price
         if self._check_trailing_stop(symbol, price, position, timestamp):
             return
-        
-        # Check for market close
+
+        # TIME EXIT: Market close
         if current_time >= self.market_close:
-            self._exit_position(symbol, price, timestamp, 'TIME')
-    
-    def _check_step_exits(self, symbol: str, price: float, position: dict):
+            self._exit_position(symbol, price, timestamp, 'TIME', position['remaining_qty'])
+
+        # Remove position if fully exited
+        if position['remaining_qty'] <= 0:
+            self.positions.pop(symbol, None)
+
+    def _check_step_exits(self, symbol: str, price: float, position: dict, timestamp: datetime):
         """Check for partial profit taking at predefined levels."""
         entry = position['entry_price']
         side = position['side']
-        
+        total_qty = position['quantity']
+
         profit_ratio = (price - entry) / entry if side == 'BUY' else (entry - price) / entry
-        
+
         for pct, portion in position['steps']:
             if pct in position['filled_steps']:
                 continue
-                
-            if profit_ratio >= pct:
+
+            if profit_ratio >= pct and position['remaining_qty'] > 0:
+                qty_to_exit = int(total_qty * portion)
+                # Round to nearest multiple of default_quantity
+                qty_to_exit = max(self.default_quantity, (qty_to_exit // self.default_quantity) * self.default_quantity)
+                qty_to_exit = min(qty_to_exit, position['remaining_qty'])
+                if qty_to_exit <= 0:
+                    continue
                 position['filled_steps'].add(pct)
-                position['position_size'] -= portion
+                position['remaining_qty'] -= qty_to_exit
+                position['position_size'] = position['remaining_qty'] / total_qty
+                self._exit_position(symbol, price, timestamp, f'STEP_{int(pct*100)}', qty_to_exit)
                 self._logger.info(
                     f"STEP EXIT {symbol} @ {price} "
-                    f"({portion*100:.0f}% @ {pct*100:.0f}%)"
+                    f"({qty_to_exit} qty @ {pct*100:.0f}%)"
                 )
-    
+
     def _check_trailing_stop(self, symbol: str, price: float, 
                            position: dict, timestamp: datetime) -> bool:
         """Check if trailing stop is triggered."""
         side = position['side']
-        
+        total_qty = position['quantity']
+        if position['remaining_qty'] <= 0:
+            return False
+
         if side == 'BUY':
             peak = position['max_profit_price']
             retrace = (peak - price) / peak
         else:
             trough = position['min_profit_price']
             retrace = (price - trough) / trough
-        
+
         if retrace >= self.exit_max_pct:
-            self._exit_position(symbol, price, timestamp, 'TRAIL')
+            qty_to_exit = position['remaining_qty']
+            self._exit_position(symbol, price, timestamp, 'TRAIL', qty_to_exit)
             return True
         return False
-    
+
     def _check_risk_exit(self, symbol: str, price: float, 
                         vwap: float, timestamp: datetime, safety_pct: float = 0.03):
         """Check for risk-based exits on tick data."""
         position = self.positions.get(symbol)
-        if not position:
+        if not position or position['remaining_qty'] <= 0:
             return
-            
+
         side = position['side']
         entry = position['entry_price']
-        
-        # Safety stop loss
+
+        # SAFETY EXIT: Hard stop loss (3% default)
         if (side == 'BUY' and price <= entry * (1 - safety_pct)) or \
            (side == 'SELL' and price >= entry * (1 + safety_pct)):
-            self._exit_position(symbol, price, timestamp, 'SAFETY')
+            qty_to_exit = position['remaining_qty']
+            self._exit_position(symbol, price, timestamp, 'SAFETY', qty_to_exit)
             return
-            
-        # VWAP-based risk exit
+
+        # RISK EXIT: Cross back over VWAP
         if (side == 'BUY' and price < vwap) or (side == 'SELL' and price > vwap):
-            self._exit_position(symbol, price, timestamp, 'RISK')
-    
+            qty_to_exit = position['remaining_qty']
+            self._exit_position(symbol, price, timestamp, 'RISK', qty_to_exit)
+
     def _exit_position(self, symbol: str, price: float, 
-                      timestamp: datetime, exit_type: str):
+                      timestamp: datetime, exit_type: str, qty: int):
         """Exit a position and record the trade."""
         if symbol not in self.positions:
             return
-            
-        position = self.positions.pop(symbol)
+
+        position = self.positions[symbol]
         side = position['side']
         entry_price = position['entry_price']
-        
-        # Calculate P&L
+        total_qty = position['quantity']
+
+        # Calculate P&L for this exit
         if side == 'BUY':
-            pnl = price - entry_price
+            pnl = (price - entry_price) * qty
         else:
-            pnl = entry_price - price
-            
-        pnl_pct = (pnl / entry_price) * 100
-        
+            pnl = (entry_price - price) * qty
+
+        pnl_pct = (pnl / (entry_price * qty)) * 100 if qty > 0 else 0
+
         # Create trade record
         trade = Trade(
             symbol=symbol,
@@ -268,14 +304,18 @@ class VwapStrategy:
             pnl=round(pnl, 2),
             pnl_pct=round(pnl_pct, 2)
         )
-        
+
         self._record_trade(trade)
         self._logger.info(
             f"EXIT {side} {symbol} @ {price} | "
             f"P&L: {pnl:.2f} ({pnl_pct:.2f}%) | "
-            f"Reason: {exit_type}"
+            f"Qty: {qty} | Reason: {exit_type}"
         )
-    
+
+        # If all quantity exited, remove position
+        if position['remaining_qty'] <= 0:
+            self.positions.pop(symbol, None)
+
     def get_active_positions(self) -> Dict[str, dict]:
         """Get all active positions."""
         return self.positions

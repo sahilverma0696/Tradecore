@@ -4,6 +4,11 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, Any, Optional, List
 import json
+from src.logger_factory import get_logger
+
+DATA_DIR = Path("data")
+DATA_DIR.mkdir(exist_ok=True)
+DB_PATH = DATA_DIR / "quotes.db"
 
 def get_ist_date_string() -> str:
     ist = pytz.timezone("Asia/Kolkata")
@@ -14,8 +19,9 @@ def get_table_name() -> str:
     return f"quotes_{get_ist_date_string()}"
 
 class QuoteDatabase:
-    def __init__(self, db_path: str = "quotes.db"):
-        self.db_path = db_path
+    def __init__(self, db_path: str = DB_PATH):
+        self.db_path = str(db_path)
+        self._logger = get_logger("QuoteDatabase")
         self._ensure_table_exists()
     
     def _get_connection(self) -> sqlite3.Connection:
@@ -52,6 +58,7 @@ class QuoteDatabase:
             """)
             
             conn.commit()
+        self._logger.debug(f"Ensured table exists: {table_name}")
     
     def save_quote(self, quote: Dict[str, Any]) -> bool:
         self._ensure_table_exists()
@@ -88,10 +95,11 @@ class QuoteDatabase:
                 
                 cursor.execute(query, list(data.values()))
                 conn.commit()
+                self._logger.debug(f"Saved quote for inst={data['inst']} at {data['ts']}")
                 return True
                 
         except Exception as e:
-            print(f"Error saving quote: {e}")
+            self._logger.error(f"Error saving quote: {e}")
             return False
     
     def get_latest_quote(self, instrument_token: int) -> Optional[Dict[str, Any]]:
@@ -127,6 +135,7 @@ class QuoteDatabase:
             if quote.get('depth'):
                 quote['depth'] = json.loads(quote['depth'])
                 
+            self._logger.debug(f"Fetched latest quote for {instrument_token}: {quote if row else 'None'}")
             return quote
     
     def get_quotes_in_range(self, instrument_token: int, 
@@ -199,6 +208,7 @@ class QuoteDatabase:
                         quote['depth'] = json.loads(quote['depth'])
                     all_quotes.append(quote)
         
+        self._logger.debug(f"Fetched {len(all_quotes)} quotes for {instrument_token} between {start_time} and {end_time}")
         return all_quotes
 # Example usage:
 if __name__ == "__main__":

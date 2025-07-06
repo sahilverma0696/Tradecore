@@ -17,7 +17,7 @@ def build():
 
     candle_maker = CandleMaker()
     order_mgr = OrderManager()
-    strategy = VwapStrategy()  # Use default or pass config as needed
+    strategy = VwapStrategy(config=cfg)  # Pass config
 
     # --- streamer first ---
     streamer = ZerodhaStreamer(
@@ -39,9 +39,10 @@ def build():
                 name=name,
                 instrument=cfg['name_symbol'][name],
                 step=[s[0] for s in pos['steps']],
-                trail=[0.1]*len(pos['steps']),  # Example: static trail, adjust as needed
+                trail=[cfg.get('exit_max_pct', 0.01)]*len(pos['steps']),
                 side=pos['side'],
-                candle=candle
+                candle=candle,
+                quantity=pos['quantity']  # Pass correct quantity
             )
 
     # Handler for new quotes: let strategy manage exits and update order_mgr
@@ -58,7 +59,7 @@ def build():
     streamer.init_kite(cfg.get('access_token'))
 
     execer = Executioner(kite_client=streamer.get_kite(), paper_trade=cfg.get('paper_trade', True))
-    order_mgr.on_order_created = lambda name, order, timestamp: execer.place_market(order.instrument, order.side)
+    order_mgr.on_order_created = lambda name, order, timestamp: execer.place_market(order.instrument, order.side, quantity=order.quantity)
 
     streamer.start()
 
