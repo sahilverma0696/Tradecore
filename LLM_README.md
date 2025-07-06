@@ -18,8 +18,6 @@ This is an algorithmic trading system implementing a VWAP (Volume Weighted Avera
     - `order_logger.py` — CSV logger for order entries/exits.
     - `candle_maker.py` — Aggregates tick data into 5-min candles, computes VWAP.
     - `executioner.py` — Places orders via KiteConnect or simulates (paper trade).
-    - `signal_manager.py` — (Deprecated) Entry signal logic (now in strategy).
-    - `exit_manager.py` — (Deprecated) Exit logic (now in strategy).
   - `market/`
     - `zerodha_streamer.py` — Handles live tick streaming from KiteTicker.
     - `quote_database.py` — Persists tick data to SQLite, provides historical access.
@@ -29,6 +27,7 @@ This is an algorithmic trading system implementing a VWAP (Volume Weighted Avera
 - `trading_config.json` — Main config file: symbols, credentials, instrument settings, execution params.
 - `logs/` — Log files and CSVs for orders/candles.
 - `requirements.txt` — Python dependencies.
+- `tests/` — Unit tests for all major modules.
 
 ---
 
@@ -82,19 +81,30 @@ This is an algorithmic trading system implementing a VWAP (Volume Weighted Avera
   - `api_key`, `api_secret`, `access_token`: Kite credentials.
   - `paper_trade`: Bool, if true, no live orders.
   - `instrument_config`: Per-symbol step/trail settings.
-  - `execution`: Per-symbol order quantities.
+  - `execution`: Per-symbol order quantities, deltas, retry settings.
 
 ---
 
 ## Main Entry Point
 
-- Run `src/main.py` to start the system.
-- System flow:
-  1. Load config.
-  2. Start streamer.
-  3. Aggregate candles.
-  4. Strategy decides entries/exits.
-  5. Orders are managed and executed/logged.
+To run the trading system from the `vwap` directory:
+```bash
+python3 -m src.main
+```
+
+---
+
+## Running Tests
+
+To run all tests:
+```bash
+python3 -m unittest discover -s tests
+```
+
+Or run a specific test file, for example:
+```bash
+python3 -m unittest tests/test_vwap_flow.py
+```
 
 ---
 
