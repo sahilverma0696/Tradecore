@@ -58,22 +58,50 @@ class ZerodhaStreamer:
             tok = t['instrument_token']
             if tok not in self.symbols:
                 continue
-            price = float(t['last_price'])
+                
+            # Create a comprehensive quote dictionary with all available fields
             ts = t.get('timestamp') or t.get('exchange_timestamp') or datetime.now()
             quote = {
+                'instrument_token': tok,
+                'timestamp': ts,
+                'mode': t.get('mode'),
+                'volume': t.get('volume'),
+                'last_price': t.get('last_price'),
+                'average_price': t.get('average_price'),
+                'last_quantity': t.get('last_quantity'),
+                'buy_quantity': t.get('buy_quantity'),
+                'sell_quantity': t.get('sell_quantity'),
+                'change': t.get('change'),
+                'last_trade_time': t.get('last_trade_time'),
+                'ohlc': t.get('ohlc'),
+                'depth': t.get('depth')
+            }
+            
+            # Also include the original format for backward compatibility
+            compat_quote = {
                 'ts': ts,
                 'inst': tok,
                 'name': self.name_symbol,
-                'ltp': price,
+                'ltp': t.get('last_price'),
                 'last_quantity': t.get('last_quantity', 0),
                 'volume': t.get('volume', 0),
                 'change': t.get('change')
             }
+            
+            # Call all registered handlers with the compatibility quote
             for cb in self._handlers:
                 try:
-                    cb(quote)
+                    cb(compat_quote)
                 except Exception as e:
                     self._logger.error(f"handler error: {e}")
+                    
+            # Store the full quote in the database
+            try:
+                from .quote_database import QuoteDatabase
+                db = QuoteDatabase()
+                db.save_quote(quote)
+            except Exception as e:
+                self._logger.error(f"Failed to save quote to database: {e}")
 
     def _on_connect(self, ws, response):
         self._logger.info("Ticker connected. Subscribing to symbols ...")
