@@ -70,22 +70,13 @@ def on_connect(ws, response):
     ws.set_mode(ws.MODE_FULL, inst_tokens)
 
 def on_close(ws, code, reason):
-    logging.warning(f"WebSocket closed: {reason}. Attempting to reconnect...")
-    attempt_reconnect()
+    logging.warning(f"WebSocket closed: {reason} (code: {code})")
 
-def attempt_reconnect():
-    time.sleep(1)
-    logging.info("Attempting to reconnect...")
-    connect_and_subscribe()
+def on_reconnect(ws, attempts_count):
+    logging.info(f"Reconnecting... Attempt #{attempts_count}")
 
-def connect_and_subscribe():
-    global kws
-    try:
-        kws.connect(threaded=True)
-    except Exception as e:
-        logging.error(f"Exception while reconnecting: {e}")
-        time.sleep(1)
-        attempt_reconnect()
+def on_noreconnect(ws):
+    logging.error("Max reconnection attempts reached. No further attempts will be made.")
 
 def check_data_flow():
     global last_data_time
@@ -93,11 +84,10 @@ def check_data_flow():
     while True:
         current_time = datetime.now().time()
         if current_time >= market_close_time:
-            logging.info("Market closed. Stopping reconnection attempts.")
+            logging.info("Market closed. Stopping data flow check.")
             break
         if time.time() - last_data_time > 1:
-            logging.warning("Data delay detected. Attempting to reconnect.")
-            attempt_reconnect()
+            logging.warning("Data delay detected. (No tick in >1s)")
         time.sleep(1)
 
 def wait_until_market_start():
@@ -117,10 +107,8 @@ def wait_until_market_start():
 def main():
     global kws, last_data_time, data_queue, inst_tokens
 
-    # Calculate and sleep until market start
     wait_until_market_start()
 
-    # After waking up, create the instance and connect
     try:
         db_connection = setup_database()
         data_queue = queue.Queue(maxsize=1000)
@@ -135,11 +123,21 @@ def main():
         kws.on_ticks = on_ticks
         kws.on_connect = on_connect
         kws.on_close = on_close
+        kws.on_reconnect = on_reconnect
+        kws.on_noreconnect = on_noreconnect
 
         inst_tokens = [10250754,10251778,10252546,10252802,10254850,10255106]
 
         last_data_time = time.time()
-        connect_and_subscribe()
+
+        # Use KiteTicker.connect() with auto-reconnect parameters as per docs
+        kws.connect(
+            threaded=True,
+            disable_ssl_verification=False,
+            retry=10,            # Number of auto-reconnect attempts
+            interval=3,          # Interval between reconnect attempts (seconds)
+            max_delay=60         # Max delay between reconnects (seconds)
+        )
 
         data_flow_thread = threading.Thread(target=check_data_flow, daemon=True)
         data_flow_thread.start()
@@ -159,5 +157,7 @@ def main():
     except Exception as e:
         logging.error(f"❌ Failed to initialize after sleep: {e}")
 
+if __name__ == "__main__":
+    main()
 if __name__ == "__main__":
     main()
