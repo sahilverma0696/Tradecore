@@ -6,14 +6,17 @@ import threading
 import queue
 import time
 import logging
+import pytz  # <-- added
 
 logging.basicConfig(level=logging.DEBUG)
 
 DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "data")
 os.makedirs(DATA_DIR, exist_ok=True)
 
+IST = pytz.timezone("Asia/Kolkata")
+
 def setup_database():
-    current_time = datetime.now().strftime("%Y_%m_%d")
+    current_time = datetime.now(IST).strftime("%Y_%m_%d")  # Use IST for filename
     db_file = os.path.join(DATA_DIR, f'stock_feed_{current_time}.db')
     conn = sqlite3.connect(db_file, check_same_thread=False)
     cursor = conn.cursor()
@@ -53,12 +56,14 @@ def on_ticks(ws, ticks):
     global last_data_time
     last_data_time = time.time()
     logging.debug("Ticks: {}".format(ticks))
+    # Use IST for timestamp
+    ist_now = datetime.now(IST).strftime("%Y-%m-%d %H:%M:%S")
     data = [
         (
             tick['instrument_token'],
             tick['last_price'],
             tick.get('volume', 0),
-            datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            ist_now
         )
         for tick in ticks
     ]
@@ -80,9 +85,11 @@ def on_noreconnect(ws):
 
 def check_data_flow():
     global last_data_time
+    # Market close time in IST
     market_close_time = dt_time(15, 30)
     while True:
-        current_time = datetime.now().time()
+        # Use IST for current time
+        current_time = datetime.now(IST).time()
         if current_time >= market_close_time:
             logging.info("Market closed. Stopping data flow check.")
             break
@@ -91,13 +98,14 @@ def check_data_flow():
         time.sleep(1)
 
 def wait_until_market_start():
-    now = datetime.now()
+    """Sleep until 09:14:55 AM IST"""
+    now = datetime.now(IST)
     start_time = now.replace(hour=9, minute=14, second=55, microsecond=0)
     if now >= start_time:
-        logging.info("⏰ Already past 09:14:55 AM. Starting immediately.")
+        logging.info("⏰ Already past 09:14:55 AM IST. Starting immediately.")
         return
     wait_seconds = (start_time - now).total_seconds()
-    logging.info(f"😴 Sleeping for {int(wait_seconds)} seconds until 09:14 AM...")
+    logging.info(f"😴 Sleeping for {int(wait_seconds)} seconds until 09:14:55 AM IST...")
     try:
         time.sleep(wait_seconds)
     except Exception as e:
@@ -117,7 +125,7 @@ def main():
         db_thread.start()
 
         api_key = "zy7p41049ggnphlu"
-        access_token = "your_access_token_here"  # Replace with your actual access token
+        access_token = "IUcW5WHatRvX20laU0qqoHWS7Z0jw2ej"  # Replace with your actual access token
         kws = KiteTicker(api_key, access_token)
 
         kws.on_ticks = on_ticks
@@ -126,17 +134,14 @@ def main():
         kws.on_reconnect = on_reconnect
         kws.on_noreconnect = on_noreconnect
 
-        inst_tokens = [10250754,10251778,10252546,10252802,10254850,10255106]
+        inst_tokens = [12111106,12110850,12107266,12107010,12108290,12108034]
 
         last_data_time = time.time()
 
-        # Use KiteTicker.connect() with auto-reconnect parameters as per docs
+        # Remove unsupported arguments from connect()
         kws.connect(
             threaded=True,
-            disable_ssl_verification=False,
-            retry=10,            # Number of auto-reconnect attempts
-            interval=3,          # Interval between reconnect attempts (seconds)
-            max_delay=60         # Max delay between reconnects (seconds)
+            disable_ssl_verification=False
         )
 
         data_flow_thread = threading.Thread(target=check_data_flow, daemon=True)
@@ -157,7 +162,5 @@ def main():
     except Exception as e:
         logging.error(f"❌ Failed to initialize after sleep: {e}")
 
-if __name__ == "__main__":
-    main()
 if __name__ == "__main__":
     main()
