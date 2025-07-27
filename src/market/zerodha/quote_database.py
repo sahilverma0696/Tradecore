@@ -6,29 +6,34 @@ from typing import Dict, Any, Optional, List
 import json
 from src.logger_factory import get_logger
 
-DATA_DIR = Path("data")
-DATA_DIR.mkdir(exist_ok=True)
-DB_PATH = DATA_DIR / "quotes.db"
 
 def get_ist_date_string() -> str:
     ist = pytz.timezone("Asia/Kolkata")
     now_ist = datetime.now(ist)
     return now_ist.strftime('%Y%m%d')
 
-def get_table_name() -> str:
-    return f"quotes_{get_ist_date_string()}"
+DATA_DIR = Path("data/db")
+DATA_DIR.mkdir(exist_ok=True)
+
 
 class QuoteDatabase:
-    def __init__(self, db_path: str = DB_PATH):
-        self.db_path = str(db_path)
+    def __init__(self, db_dir: str = DATA_DIR,date: str = get_ist_date_string(),symbol: str = "NSE_OPTIONS",):
+        self.table_name = f"quotes_{symbol}_{date}"
+        self.db_path = str(db_dir / self.table_name)+".db"
         self._logger = get_logger("QuoteDatabase")
+        self._cx = None
         self._ensure_table_exists()
+        self._logger.info(f"Initialized QuoteDatabase at {self.db_path} for symbol {symbol} on date {date} with table {self.table_name}")
+        
     
     def _get_connection(self) -> sqlite3.Connection:
-        return sqlite3.connect(self.db_path)
+        if(self._cx is None):
+            self._cx = sqlite3.connect(self.db_path, isolation_level=None)
+        return self._cx
     
     def _ensure_table_exists(self) -> None:
-        table_name = get_table_name()
+        table_name = self.table_name
+        self._logger.debug(f"Ensuring table exists: {table_name}")
         
         with self._get_connection() as conn:
             cursor = conn.cursor()
@@ -82,7 +87,7 @@ class QuoteDatabase:
                     'depth': json.dumps(quote.get('depth', {})) if quote.get('depth') else None
                 }
                 
-                table_name = get_table_name()
+                table_name = self.table_name
                 columns = ', '.join(data.keys())
                 placeholders = ', '.join(['?'] * len(data))
                 updates = ', '.join([f"{k} = excluded.{k}" for k in data.keys()])
@@ -103,7 +108,7 @@ class QuoteDatabase:
             return False
     
     def get_latest_quote(self, instrument_token: int) -> Optional[Dict[str, Any]]:
-        table_name = get_table_name()
+        table_name = self.table_name
         
         with self._get_connection() as conn:
             cursor = conn.cursor()
@@ -210,46 +215,46 @@ class QuoteDatabase:
         
         self._logger.debug(f"Fetched {len(all_quotes)} quotes for {instrument_token} between {start_time} and {end_time}")
         return all_quotes
-# Example usage:
-if __name__ == "__main__":
-    # Example of how to use the QuoteDatabase
-    db = QuoteDatabase("example_quotes.db")
+# # Example usage:
+# if __name__ == "__main__":
+#     # Example of how to use the QuoteDatabase
+#     db = QuoteDatabase("example_quotes.db")
     
-    # Example quote data
-    example_quote = {
-        'instrument_token': 53490439,
-        'mode': 'full',
-        'volume': 12510,
-        'last_price': 4084.0,
-        'average_price': 4086.55,
-        'last_quantity': 1,
-        'buy_quantity': 2356,
-        'sell_quantity': 2440,
-        'change': 0.46740467404674046,
-        'last_trade_time': datetime.now(),
-        'timestamp': datetime.now(),
-        'ohlc': {
-            'high': 4093.0,
-            'close': 4065.0,
-            'open': 4088.0,
-            'low': 4080.0
-        },
-        'depth': {
-            'buy': [
-                {'price': 4084.0, 'quantity': 53, 'orders': 10},
-                {'price': 4083.0, 'quantity': 145, 'orders': 12}
-            ],
-            'sell': [
-                {'price': 4085.0, 'quantity': 43, 'orders': 8},
-                {'price': 4086.0, 'quantity': 134, 'orders': 15}
-            ]
-        }
-    }
+#     # Example quote data
+#     example_quote = {
+#         'instrument_token': 53490439,
+#         'mode': 'full',
+#         'volume': 12510,
+#         'last_price': 4084.0,
+#         'average_price': 4086.55,
+#         'last_quantity': 1,
+#         'buy_quantity': 2356,
+#         'sell_quantity': 2440,
+#         'change': 0.46740467404674046,
+#         'last_trade_time': datetime.now(),
+#         'timestamp': datetime.now(),
+#         'ohlc': {
+#             'high': 4093.0,
+#             'close': 4065.0,
+#             'open': 4088.0,
+#             'low': 4080.0
+#         },
+#         'depth': {
+#             'buy': [
+#                 {'price': 4084.0, 'quantity': 53, 'orders': 10},
+#                 {'price': 4083.0, 'quantity': 145, 'orders': 12}
+#             ],
+#             'sell': [
+#                 {'price': 4085.0, 'quantity': 43, 'orders': 8},
+#                 {'price': 4086.0, 'quantity': 134, 'orders': 15}
+#             ]
+#         }
+#     }
     
-    # Save the quote
-    quote_id = db.save_quote(example_quote)
-    print(f"Saved quote with ID: {quote_id}")
+#     # Save the quote
+#     quote_id = db.save_quote(example_quote)
+#     print(f"Saved quote with ID: {quote_id}")
     
-    # Retrieve the latest quote
-    latest = db.get_latest_quote(53490439)
-    print(f"Latest quote: {latest}")
+#     # Retrieve the latest quote
+#     latest = db.get_latest_quote(53490439)
+#     print(f"Latest quote: {latest}")

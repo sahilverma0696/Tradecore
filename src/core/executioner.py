@@ -56,6 +56,7 @@ class Execute:
     
     def get_quantity(self, symbol):
         """Get quantity for a symbol from config"""
+        ## Get quantities from execution config based on symbol and buy or sell action
         quantities = self.execution_config.get('quantities', {})
         return quantities.get(symbol, quantities.get('default', 75))
     
@@ -64,7 +65,14 @@ class Execute:
         return round(value / 100) * 100
     
     def place_order(self, symbol, action, timestamp=''):
-        """Wrapper for placing a market order using the Zerodha Kite SDK, with retry logic."""
+        """Wrapper for placing a market order using the Zerodha Kite SDK, with retry logic.
+        Args:
+            symbol (str): The trading symbol for the order.
+            action (str): 'B' for buy, 'S' for sell.
+            timestamp (str): Optional timestamp for the order, defaults to current time if not provided.
+        Returns:
+            bool: True if order was placed successfully, False otherwise.
+        """
         quantity = self.get_quantity(symbol)
         self.logger.debug(f"Attempting to place order: {symbol} {action} quantity: {quantity}")
         

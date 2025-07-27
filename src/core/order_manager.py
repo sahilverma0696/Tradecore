@@ -11,7 +11,13 @@ class OrderManager:
         self._orders: Dict[str, OrderObject] = {}
         self._logger = get_logger("OrderManager")
         self._order_logger = OrderLogger(log_dir)
-        self.on_order_created = None  # callback(name, order, timestamp)
+        self._handlers = []  # callback(name, order, timestamp)
+        self._logger.info("OrderManager initialized")
+        
+    def register_handler(self, cb):
+        if callable(cb):
+            self._logger.debug(f"Registering handler {cb.__name__}")
+            self._handlers.append(cb)
 
     # ------------------------------------------------------------------
     def create_order(self, timestamp: datetime, name: str, instrument: str, step, trail, side: str, candle=None, quantity=None):
@@ -20,21 +26,22 @@ class OrderManager:
         if existing_order:
             if existing_order.get_side() != side:
                 # Remove existing order before new direction
+                self._logger.info(f"Switching direction for order {name} from {existing_order.get_side()} to {side}")
                 self.remove_order(name, timestamp, "DIRECTION_SWITCH", candle['close'] if candle else 0)
             else:
-                self._logger.warning(f"Order {name} already exists with same direction")
+                self._logger.warning(f"Order {name} already exists with same direction, not creating a new one.")
                 return existing_order
         order = OrderObject(name, instrument, step, trail, side, candle)
         if quantity is not None:
             order.quantity = quantity
         self._orders[name] = order
-        self._logger.info(f"Created order {name}")
+        self._logger.info(f"Created order {name} with side {side} at {timestamp}")
         self._order_logger.log_entry(order)
-        if callable(self.on_order_created):
+        if callable(self._handlers):
             try:
-                self.on_order_created(name=name, order=order, timestamp=timestamp)
+                self._handlers(name=name, order=order, timestamp=timestamp)
             except Exception as cb_err:
-                self._logger.error(f"on_order_created error: {cb_err}")
+                self._logger.error(f"_handlers error: {cb_err}")
         return order
 
     def has_order(self, name: str) -> bool:

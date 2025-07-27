@@ -28,12 +28,13 @@ class ZerodhaStreamer:
         self._ticker: KiteTicker | None = None
         self._handlers: List[Callable[[dict], None]] = []
         self._paper = paper_trade
-        self._exec: Executioner | None = None
+        self._exec: Execute | None = None
         self._last_second: dict[int, str] = {}
 
     # ------------------------------------------------------------------
     def register_handler(self, cb):
         if callable(cb):
+            self._logger.debug(f"Registering handler {cb.__name__}")
             self._handlers.append(cb)
 
     # ------------------------------------------------------------------
@@ -46,7 +47,7 @@ class ZerodhaStreamer:
             req = input("Enter request token: ")
             sess = self._kite.generate_session(req, api_secret=self.api_secret)
             self._kite.set_access_token(sess["access_token"])
-        self._exec = Executioner(self._kite, paper_trade=self._paper, logger=self._logger)
+        self._exec = Execute(self._kite, paper_trade=self._paper, logger=self._logger)
 
     # ------------------------------------------------------------------
     def get_kite(self):

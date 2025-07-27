@@ -127,14 +127,14 @@ class VwapStrategy:
 
         self._logger.debug(f"on_candle: {symbol} {candle}")
 
-    def on_quote(self, symbol: str, ltp: float, volume: float, timestamp: datetime):
+    def vwap_on_quote(self, symbol: str, ltp: float, volume: float, timestamp: datetime):
         """Process a new quote (tick data) and handle risk exits."""
         vwap = self.vwaps[symbol].update_from_quote(ltp, volume)
         # RISK EXIT LOGIC: Safety and VWAP-based
         if symbol in self.positions:
             self._check_risk_exit(symbol, ltp, vwap, timestamp)
 
-        self._logger.debug(f"on_quote: {symbol} ltp={ltp} volume={volume} ts={timestamp}")
+        self._logger.debug(f"vwap_on_quote: {symbol} ltp={ltp} volume={volume} ts={timestamp}")
 
     def _check_entry(self, symbol: str, candle: dict, open_price: float, 
                     close_price: float, vwap: float):

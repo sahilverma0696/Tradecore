@@ -18,7 +18,7 @@ class CandleMaker:
         if csv_file is None:
             csv_file = os.path.join(DATA_CANDLE_DIR, "candles.csv")
         self._csv_file = csv_file
-        self._handlers = []
+        self._handlers = []     # List of callbacks to notify on new candles
         self._current: dict = {}
         self._vwap_data = defaultdict(lambda: {"cum_tp_vol": 0.0, "cum_vol": 0.0})
         self._logger = get_logger("CandleMaker")
@@ -28,15 +28,18 @@ class CandleMaker:
                 writer = csv.writer(f)
                 writer.writerow(["timestamp", "inst", "name", "open", "high", "low", "close", "volume", "vwap"])
         self._logger.info(f"CandleMaker initialized, writing to {self._csv_file}")
+        self._logger.info("writing with header: timestamp, inst, name, open, high, low, close, volume, vwap")
 
     # ------------------------------------------------------------------
     def register_handler(self, cb):
         if callable(cb):
+            self._logger.debug(f"Registering handler {cb.__name__}")
             self._handlers.append(cb)
 
     # ------------------------------------------------------------------
     # update the fields according to how data is updated from zerodha quotes
-    def handle_quote(self, quote: dict):
+    def handle_quote_to_candle(self, quote: dict):
+        self._logger.debug(f"Handling quote: {quote}")
         ts: datetime = quote['ts']
         inst = quote['inst']
         name = quote['name']
@@ -47,7 +50,11 @@ class CandleMaker:
         current = self._current.get(inst)
         if current is None or current['timestamp'] != candle_time:
             if current:
+                self._logger.debug(f"Finalizing candle for {inst} at {current['timestamp']}")
+                # Finalize the previous candle
                 self._finalize(inst, current)
+                self._logger.debug(f"Creating new candle for {inst} at {candle_time}")
+            # Create a new candle
             current = {
                 'timestamp': candle_time,
                 'open': ltp,
@@ -91,6 +98,7 @@ class CandleMaker:
         for cb in self._handlers:
             cb(candle['name'], candle)
 
+    # not called yet
     def plot_ohlc_vwap(self, inst: str, name: str = None):
         """Plot OHLC and VWAP for a given instrument and save to data/graphs/."""
         df = pd.read_csv(self._csv_file)
