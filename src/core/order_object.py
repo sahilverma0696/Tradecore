@@ -15,19 +15,30 @@ class OrderObject:
         self.ltp = 0
         self.position_size = 1.0
         self.filled_steps = set()
+
+        # Entry & timestamps
         self.entry_price = candle['close'] if candle and 'close' in candle else 0
         self.entry_time = datetime.now()
         self.last_update_time = self.entry_time
         self._timestamp = self.entry_time
+
+        # Price tracking
         self.min_price = self.entry_price if self.entry_price > 0 else 0
         self.max_price = self.entry_price if self.entry_price > 0 else 0
-        self.retreat = 0
+
+        # Performance tracking (NEW)
+        self.max_pct = 0.0  # highest favorable movement %
+        self.min_pct = 0.0  # worst adverse movement %
+        self.retreat = 0.0  # pullback from max
+        self.current_pct = 0.0  # current PnL %
+        
         self.logger = get_logger(f"OrderObject:{self.name}")
 
     # ----------------- setters -----------------
     def set_ltp(self, ltp, timestamp=None):
         self.ltp = ltp
         self._update_min_max_price(ltp)
+        self._update_pct_stats()
         self.last_update_time = timestamp or datetime.now()
         self._timestamp = self.last_update_time
         if self.entry_price == 0:
@@ -36,17 +47,30 @@ class OrderObject:
 
     def set_current_candle(self, candle, timestamp=None):
         self.current_candle = candle
-        self.last_update_time = timestamp or datetime.now()
-        self._timestamp = self.last_update_time
-        if self.entry_price == 0 and candle and 'close' in candle:
-            self.entry_price = candle['close']
-            self.entry_time = self.last_update_time
+        if candle and 'close' in candle:
+            self.set_ltp(candle['close'], timestamp)
 
     def _update_min_max_price(self, price):
         if self.min_price == 0 or price < self.min_price:
             self.min_price = price
         if self.max_price == 0 or price > self.max_price:
             self.max_price = price
+
+    def _update_pct_stats(self):
+        if not self.entry_price:
+            return
+
+        # Current % move
+        if self.side == "BUY":
+            self.current_pct = ((self.ltp - self.entry_price) / self.entry_price) * 100
+            self.max_pct = max(self.max_pct, ((self.max_price - self.entry_price) / self.entry_price) * 100)
+            self.min_pct = min(self.min_pct, ((self.min_price - self.entry_price) / self.entry_price) * 100)
+            self.retreat = self.max_pct - self.current_pct
+        else:  # SELL
+            self.current_pct = ((self.entry_price - self.ltp) / self.entry_price) * 100
+            self.max_pct = max(self.max_pct, ((self.entry_price - self.min_price) / self.entry_price) * 100)
+            self.min_pct = min(self.min_pct, ((self.entry_price - self.max_price) / self.entry_price) * 100)
+            self.retreat = self.max_pct - self.current_pct
 
     # ----------------- getters -----------------
     def get_current_step(self):
@@ -66,23 +90,19 @@ class OrderObject:
                 self.current_trail = self.trail[i] if i < len(self.trail) else self.trail[-1]
 
     # convenience accessors
-    def get_entry_price(self):
-        return self.entry_price
-    def get_entry_time(self):
-        return self.entry_time
-    def get_min_price(self):
-        return self.min_price
-    def set_min_price(self, price):
-        self.min_price = price
-    def get_max_price(self):
-        return self.max_price
-    def set_max_price(self, price):
-        self.max_price = price
-    def get_side(self):
-        return self.side
-    def get_name(self):
-        return self.name
-    def get_instrument(self):
-        return self.instrument
-    def get_ltp(self):
-        return self.ltp
+    def get_entry_price(self): return self.entry_price
+    def get_entry_time(self): return self.entry_time
+    def get_min_price(self): return self.min_price
+    def set_min_price(self, price): self.min_price = price
+    def get_max_price(self): return self.max_price
+    def set_max_price(self, price): self.max_price = price
+    def get_side(self): return self.side
+    def get_name(self): return self.name
+    def get_instrument(self): return self.instrument
+    def get_ltp(self): return self.ltp
+
+    # NEW: insight getters
+    def get_max_pct(self): return self.max_pct
+    def get_min_pct(self): return self.min_pct
+    def get_current_pct(self): return self.current_pct
+    def get_retreat(self): return self.retreat

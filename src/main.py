@@ -6,6 +6,7 @@ from src.core.candle_maker import CandleMaker
 from src.core.order_manager import OrderManager
 from src.core.executioner import Execute
 from src.strategies.vwap_strategy import VwapStrategy
+from src.strategies.exit_manager import ExitManager
 from src.market.zerodha.zerodha_streamer import ZerodhaStreamer
 from src.market.zerodha.quote_database import QuoteDatabase
 
@@ -41,8 +42,20 @@ def build():
     # Initialize strategy with configuration
     logger.info("Initializing VWAP strategy...")
     # Initialize strategy with configuration
-    strategy = VwapStrategy(config=cfg)  # Pass config
+    entry_strategy = VwapStrategy(config=cfg)  # Pass config
     logger.info("VWAPStrategy initialized.")
+    
+    # Initialize exit manager
+    logger.info("Initializing ExitManager...")
+    exit_mgr = ExitManager(
+        exit_steps=cfg.get('exit_steps'),
+        exit_max_pct=cfg.get('exit_max_pct', 0.05),
+        default_quantity=cfg.get('default_quantity', 75),
+        market_close=cfg.get('market_close'),
+        output_file=cfg.get('output_file', "trades.csv")
+    )
+    logger.info("ExitManager initialized.")
+    
 
 
     # --- streamer first ---
@@ -84,12 +97,12 @@ def build():
         ltp = quote['ltp']
         timestamp = quote.get('timestamp', datetime.now())
         volume = quote.get('volume', 0)
-        strategy.vwap_on_quote(name, ltp, volume, timestamp)
+        exit_mgr.vwap_on_quote(name, ltp, volume, timestamp)
         # order_mgr.update_ltp(name, ltp, timestamp)  ## Update this through vwap strategy
 
     # Handler for new candles: let strategy decide and create orders
     def handle_candle(name, candle):
-        strategy.on_candle(name, candle)
+        entry_strategy.on_candle(name, candle)
         
         ## TODO: add candles to data visualisation classes
         

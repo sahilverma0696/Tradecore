@@ -57,6 +57,18 @@ class OrderManager:
                 self._logger.error(f"_handlers error: {cb_err}")
         return order
 
+    def remove_order(self, name: str, timestamp: datetime, exit_reason: str, exit_price: float):
+        order = self._orders.pop(name, None)
+        if order:
+            self._logger.info(
+                f"Order {name} exited: {exit_reason} | "
+                f"Entry: {order.get_entry_price():.2f} | Exit: {exit_price:.2f} | "
+                f"Max%: {order.get_max_pct():.2f}% | Min%: {order.get_min_pct():.2f}% | "
+                f"Retreat: {order.get_retreat():.2f}% | Duration: {(timestamp - order.get_entry_time()).seconds}s"
+            )
+            self._order_logger.log_exit(order, exit_reason, exit_price)
+        return order
+    
     def has_order(self, name: str) -> bool:
         return name in self._orders
 
