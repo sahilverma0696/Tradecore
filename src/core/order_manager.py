@@ -8,7 +8,7 @@ class OrderManager:
     """Manages active orders and delegates logging."""
 
     def __init__(self, log_dir: str = "logs"):
-        self._orders: Dict[str, OrderObject] = {}
+        self._orders: Dict[str, OrderObject] = {}   # instrument -> OrderObject
         self._logger = get_logger("OrderManager")
         self._order_logger = OrderLogger(log_dir)
         self._handlers = []  # callback(name, order, timestamp)
@@ -18,6 +18,19 @@ class OrderManager:
         if callable(cb):
             self._logger.debug(f"Registering handler {cb.__name__}")
             self._handlers.append(cb)
+    
+    def get_signal(self, signal: str, instrument: str):
+        """ Decides based on the singal, what to do with the order. """
+        if signal == "ENTER":
+            self._logger.info(f"Received ENTER signal for instrument: {instrument}")
+            # Create a new order or handle existing ones
+            pass
+        elif signal == "EXIT":
+            self._logger.info(f"Received EXIT signal for instrument: {instrument}")
+            pass
+        else:
+            self._logger.warning(f"Unknown signal: {signal} for instrument: {instrument}")
+            return None
 
     # ------------------------------------------------------------------
     def create_order(self, timestamp: datetime, name: str, instrument: str, step, trail, side: str, candle=None, quantity=None):

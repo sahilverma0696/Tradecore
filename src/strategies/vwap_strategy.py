@@ -47,7 +47,7 @@ class IncrementalVWAP:
         return self.vwap
 
 class VwapStrategy:
-    """VWAP cross strategy with integrated position and risk management."""
+    """VWAP cross strategy. This class generates signals"""
     
     def __init__(self, 
                  config: dict = None,
@@ -65,13 +65,12 @@ class VwapStrategy:
 
         # Read from config
         self.exit_steps = config.get('exit_steps', [
-            (0.02, 0.3), (0.04, 0.3), (0.05, 0.3), (0.07, 0.3),
-            (0.10, 0.3), (0.15, 0.3), (0.20, 0.3), (0.30, 0.3)
+            (0.05, 0.3), (0.08, 0.3), (0.12, 0.3)
         ])
         self.market_close = datetime.strptime(
-            config.get('market_close_time', '13:39'), "%H:%M"
+            config.get('market_close_time', '13:37'), "%H:%M"
         ).time()
-        self.exit_max_pct = config.get('exit_max_pct', 0.01)
+        self.exit_max_pct = config.get('reterival_exit', 0.05)  # 5% default retracement exit
         self.default_quantity = config.get('default_quantity', 75)
         self.output_file = output_file
         
@@ -81,7 +80,7 @@ class VwapStrategy:
         
         # Initialize output file
         self._init_output_file()
-        self._logger.info("VWAPStrategy initialized")
+        self._logger.info("VWAPStrategy initialized with default values.")
 
     def _init_output_file(self):
         """Initialize the output CSV file with headers."""
@@ -121,9 +120,9 @@ class VwapStrategy:
             # SELL: open above vwap, close below vwap
             elif open_price > vwap and close_price < vwap:
                 self._enter_position(symbol, 'SELL', close_price, candle, vwap)
-        else:
-            # EXIT LOGIC: Step, Trail, Time
-            self._manage_position(symbol, close_price, vwap, now_time, candle['timestamp'])
+        # else:         ## this is handled on on_quote
+        #     # EXIT LOGIC: Step, Trail, Time
+        #     self._manage_position(symbol, close_price, vwap, now_time, candle['timestamp'])
 
         self._logger.debug(f"on_candle: {symbol} {candle}")
 
@@ -131,6 +130,7 @@ class VwapStrategy:
         """Process a new quote (tick data) and handle risk exits."""
         vwap = self.vwaps[symbol].update_from_quote(ltp, volume)
         # RISK EXIT LOGIC: Safety and VWAP-based
+        self.self._manage_position(symbol, ltp, vwap, now_time, candle['timestamp'])
         if symbol in self.positions:
             self._check_risk_exit(symbol, ltp, vwap, timestamp)
 
@@ -147,29 +147,30 @@ class VwapStrategy:
     def _enter_position(self, symbol: str, side: str, price: float, 
                        candle: dict, vwap: float):
         """Enter a new position. Ensure only one direction at a time."""
-        # If position exists and direction is opposite, remove it
-        if symbol in self.positions:
-            existing = self.positions[symbol]
-            if existing['side'] != side:
-                self.positions.pop(symbol, None)
-        total_qty = self.default_quantity
-        self.positions[symbol] = {
-            'side': side,
-            'entry_price': price,
-            'entry_time': candle['timestamp'],
-            'steps': self.exit_steps.copy(),
-            'filled_steps': set(),
-            'max_profit_price': price,
-            'min_profit_price': price,
-            'position_size': 1.0,
-            'quantity': total_qty,
-            'remaining_qty': total_qty,
-            'name': candle.get('name', symbol),
-            'entry_open': candle['open'],
-            'entry_close': candle['close'],
-            'entry_vwap': vwap
-        }
-        self._logger.info(f"ENTER {side} {symbol} @ {price} qty={total_qty}")
+        ## I think this should move to order manager
+        # # If position exists and direction is opposite, remove it
+        # if symbol in self.positions:
+        #     existing = self.positions[symbol]
+        #     if existing['side'] != side:
+        #         self.positions.pop(symbol, None)
+        # total_qty = self.default_quantity
+        # self.positions[symbol] = {
+        #     'side': side,
+        #     'entry_price': price,
+        #     'entry_time': candle['timestamp'],
+        #     'steps': self.exit_steps.copy(),
+        #     'filled_steps': set(),
+        #     'max_profit_price': price,
+        #     'min_profit_price': price,
+        #     'position_size': 1.0,
+        #     'quantity': total_qty,
+        #     'remaining_qty': total_qty,
+        #     'name': candle.get('name', symbol),
+        #     'entry_open': candle['open'],
+        #     'entry_close': candle['close'],
+        #     'entry_vwap': vwap
+        # }
+        # self._logger.info(f"ENTER {side} {symbol} @ {price} qty={total_qty}")
     
     def _manage_position(self, symbol: str, price: float, vwap: float, 
                         current_time: datetime, timestamp: datetime):
@@ -273,49 +274,50 @@ class VwapStrategy:
     def _exit_position(self, symbol: str, price: float, 
                       timestamp: datetime, exit_type: str, qty: int):
         """Exit a position and record the trade."""
-        if symbol not in self.positions:
-            return
+        ## I think this should move to order manager
+        # if symbol not in self.positions:
+        #     return
 
-        position = self.positions[symbol]
-        side = position['side']
-        entry_price = position['entry_price']
-        total_qty = position['quantity']
+        # position = self.positions[symbol]
+        # side = position['side']
+        # entry_price = position['entry_price']
+        # total_qty = position['quantity']
 
-        # Calculate P&L for this exit
-        if side == 'BUY':
-            pnl = (price - entry_price) * qty
-        else:
-            pnl = (entry_price - price) * qty
+        # # Calculate P&L for this exit
+        # if side == 'BUY':
+        #     pnl = (price - entry_price) * qty
+        # else:
+        #     pnl = (entry_price - price) * qty
 
-        pnl_pct = (pnl / (entry_price * qty)) * 100 if qty > 0 else 0
+        # pnl_pct = (pnl / (entry_price * qty)) * 100 if qty > 0 else 0
 
-        # Create trade record
-        trade = Trade(
-            symbol=symbol,
-            name=position['name'],
-            side=side,
-            entry_time=position['entry_time'],
-            entry_price=entry_price,
-            entry_open=position['entry_open'],
-            entry_close=position['entry_close'],
-            entry_vwap=position['entry_vwap'],
-            exit_time=timestamp,
-            exit_price=price,
-            exit_type=exit_type,
-            pnl=round(pnl, 2),
-            pnl_pct=round(pnl_pct, 2)
-        )
+        # # Create trade record
+        # trade = Trade(
+        #     symbol=symbol,
+        #     name=position['name'],
+        #     side=side,
+        #     entry_time=position['entry_time'],
+        #     entry_price=entry_price,
+        #     entry_open=position['entry_open'],
+        #     entry_close=position['entry_close'],
+        #     entry_vwap=position['entry_vwap'],
+        #     exit_time=timestamp,
+        #     exit_price=price,
+        #     exit_type=exit_type,
+        #     pnl=round(pnl, 2),
+        #     pnl_pct=round(pnl_pct, 2)
+        # )
 
-        self._record_trade(trade)
-        self._logger.info(
-            f"EXIT {side} {symbol} @ {price} | "
-            f"P&L: {pnl:.2f} ({pnl_pct:.2f}%) | "
-            f"Qty: {qty} | Reason: {exit_type}"
-        )
+        # self._record_trade(trade)
+        # self._logger.info(
+        #     f"EXIT {side} {symbol} @ {price} | "
+        #     f"P&L: {pnl:.2f} ({pnl_pct:.2f}%) | "
+        #     f"Qty: {qty} | Reason: {exit_type}"
+        # )
 
-        # If all quantity exited, remove position
-        if position['remaining_qty'] <= 0:
-            self.positions.pop(symbol, None)
+        # # If all quantity exited, remove position
+        # if position['remaining_qty'] <= 0:
+        #     self.positions.pop(symbol, None)
 
     def get_active_positions(self) -> Dict[str, dict]:
         """Get all active positions."""
