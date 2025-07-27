@@ -1,26 +1,14 @@
 {
-  "symbols": [260105],
+  "api_key": "your_api_key_here",
+  "api_secret": "your_secret_here",
+  "symbols": [260105], 
   "name_symbol": "NIFTY 50",
-  "api_key": "YOUR_API_KEY",
-  "api_secret": "YOUR_API_SECRET",
-  "access_token": "",
   "paper_trade": true,
-  "instrument_config": {
-    "NIFTY 50": {
-      "symbol": "NIFTY24JULFUT",
-      "step": [0.02, 0.04, 0.06],
-      "trail": [0.01, 0.02, 0.03]
-    }
-  },
   "execution": {
-    "quantities": {
-      "default": 75,
-      "NIFTY24JULFUT": 25
-    },
-    "delta1": 0.02,
-    "delta2": 0.04,
+    "delta_sell": 0.02,
+    "delta_buy": 0.04,
     "max_retries": 3,
-    "retry_delay": 1
+    "retry_delay": 50
   },
   "exit_steps": [
     [0.02, 0.3],
@@ -32,7 +20,9 @@
     [0.2, 0.3],
     [0.3, 0.3]
   ],
-  "exit_max_pct": 0.01,
+  "reterival_exit": 0.01,
   "market_close_time": "13:39",
-  "default_quantity": 75
+  "default_quantity": 75,
+  "buy_quantity": 225,
+  "sell_quantity": 75
 }

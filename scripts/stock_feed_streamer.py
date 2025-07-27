@@ -125,7 +125,7 @@ def main():
         db_thread.start()
 
         api_key = "zy7p41049ggnphlu"
-        access_token = "IUcW5WHatRvX20laU0qqoHWS7Z0jw2ej"  # Replace with your actual access token
+        access_token = "SdR3kuAkp43HyiGm0pfaav8bQGUHl2Qd"  # Replace with your actual access token
         kws = KiteTicker(api_key, access_token)
 
         kws.on_ticks = on_ticks

@@ -7,7 +7,7 @@ from typing import Callable, List
 from kiteconnect import KiteConnect, KiteTicker
 
 from src.logger_factory import get_logger
-from src.core.executioner import Executioner
+from src.core.executioner import Execute
 
 class ZerodhaStreamer:
     def __init__(

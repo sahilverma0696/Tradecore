@@ -5,8 +5,6 @@ from dataclasses import dataclass, asdict
 from typing import Dict, List, Tuple, Optional
 from src.logger_factory import get_logger
 
-# All order creation and exit logic is handled in this strategy class.
-# signal_manager.py and exit_manager.py are deprecated.
 
 @dataclass
 class Trade:

@@ -5,7 +5,7 @@ from src.logger_factory import get_logger
 from src.config_manager import ConfigManager
 
 class Execute:
-    def __init__(self, logger, excel_logger, expiry, client):
+    def __init__(self, excel_logger, expiry, client):
         self.config_manager = ConfigManager()
         self.config_manager.register_watcher(self._config_updated)
         
@@ -15,12 +15,12 @@ class Execute:
         
         # Get execution config
         self.execution_config = self.config['execution']
-        self.delta1 = self.execution_config['delta1']
-        self.delta2 = self.execution_config['delta2']
-        self.max_retries = self.execution_config.get('max_retries', 3)
+        self.delta_sell = self.execution_config.get('delta_sell')
+        self.delta_buy = self.execution_config.get('delta_buy', 0)
+        self.max_retries = self.execution_config.get('max_retries', 2)
         self.retry_delay = self.execution_config.get('retry_delay', 1)
         
-        self.logger = logger  # An instance of Logger to log messages
+        self.logger = get_logger("Execute")  # An instance of Logger to log messages
         self.excel_logger = excel_logger  # An instance of ExcelTradeLogger for logging trades
         self.expiry = expiry  # Expiry date for options
         self.state = None  # Track current trade direction ('long' or 'short')
@@ -29,30 +29,30 @@ class Execute:
         self.client = client
 
         print(f"\nInitializing Execute with configuration:")
-        print(f"Delta1: {self.delta1}")
-        print(f"Delta2: {self.delta2}")
+        print(f"Delta SELL: {self.delta_sell}")
+        print(f"Delta BUY: {self.delta_buy}")
         
         if self.logger:
-            self.logger.log(f"INIT Execute - Delta1: {self.delta1}, Delta2: {self.delta2}")
+            self.logger.debug(f"INIT Execute - Delta SELL: {self.delta_sell}, Delta BUY: {self.delta_buy}, Max Retries: {self.max_retries}, Retry Delay: {self.retry_delay}")
     
     def _config_updated(self, new_config):
         """Handle config updates"""
         if 'execution' in new_config:
             execution_config = new_config['execution']
-            old_delta1 = self.delta1
-            old_delta2 = self.delta2
+            old_delta_sell = self.delta_sell
+            old_delta_buy = self.delta_buy
             
-            self.delta1 = execution_config.get('delta1', self.delta1)
-            self.delta2 = execution_config.get('delta2', self.delta2)
+            self.delta_sell = execution_config.get('delta_sell', self.delta_sell)
+            self.delta_buy = execution_config.get('delta_buy', self.delta_buy)
             self.max_retries = execution_config.get('max_retries', self.max_retries)
             self.retry_delay = execution_config.get('retry_delay', self.retry_delay)
             
-            if old_delta1 != self.delta1 or old_delta2 != self.delta2:
+            if old_delta_sell != self.delta_sell or old_delta_buy != self.delta_buy:
                 print(f"\nExecute configuration updated:")
-                print(f"Delta1: {old_delta1} -> {self.delta1}")
-                print(f"Delta2: {old_delta2} -> {self.delta2}")
+                print(f"delta_sell: {old_delta_sell} -> {self.delta_sell}")
+                print(f"delta_buy: {old_delta_buy} -> {self.delta_buy}")
                 if self.logger:
-                    self.logger.log(f"Execute config updated - Delta1: {self.delta1}, Delta2: {self.delta2}")
+                    self.logger.debug(f"Execute config updated - delta_sell: {self.delta_sell}, delta_buy: {self.delta_buy}")
     
     def get_quantity(self, symbol):
         """Get quantity for a symbol from config"""
@@ -66,7 +66,7 @@ class Execute:
     def place_order(self, symbol, action, timestamp=''):
         """Wrapper for placing a market order using the Zerodha Kite SDK, with retry logic."""
         quantity = self.get_quantity(symbol)
-        self.logger.log(f"Attempting to place order: {symbol} {action} quantity: {quantity}")
+        self.logger.debug(f"Attempting to place order: {symbol} {action} quantity: {quantity}")
         
         for attempt in range(self.max_retries):
             try:
@@ -81,17 +81,17 @@ class Execute:
                     product=self.client.PRODUCT_MIS,
                 )
                 
-                self.logger.log(f"Order placed successfully for {symbol} {action} with quantity {quantity}")
+                self.logger.debug(f"Order placed successfully for {symbol} {action} with quantity {quantity}")
                 self.excel_logger.log_trade(symbol, action, None, timestamp)
                 return True
                 
             except Exception as e:
-                self.logger.log(f"Error placing order for {symbol}: {str(e)}")
+                self.logger.debug(f"Error placing order for {symbol}: {str(e)}")
                 if attempt < self.max_retries - 1:
                     time.sleep(self.retry_delay)
-                    self.logger.log(f"Retrying... ({attempt + 1}/{self.max_retries})")
+                    self.logger.debug(f"Retrying... ({attempt + 1}/{self.max_retries})")
         
-        self.logger.log(f"Failed to place order for {symbol} after {self.max_retries} attempts.")
+        self.logger.debug(f"Failed to place order for {symbol} after {self.max_retries} attempts.")
         return False
     
     def execute_order(self, symbol, direction, timestamp):
