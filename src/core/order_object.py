@@ -37,8 +37,10 @@ class OrderObject:
     # ----------------- setters -----------------
     def set_ltp(self, ltp, timestamp=None):
         self.ltp = ltp
+        
         self._update_min_max_price(ltp)
         self._update_pct_stats()
+        self.update_step()
         self.last_update_time = timestamp or datetime.now()
         self._timestamp = self.last_update_time
         if self.entry_price == 0:

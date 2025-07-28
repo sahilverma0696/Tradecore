@@ -22,11 +22,13 @@ class CandleMaker:
         self._current: dict = {}
         self._vwap_data = defaultdict(lambda: {"cum_tp_vol": 0.0, "cum_vol": 0.0})
         self._logger = get_logger("CandleMaker")
+
         # ensure header
         if not os.path.exists(self._csv_file):
             with open(self._csv_file, 'w', newline='') as f:
                 writer = csv.writer(f)
                 writer.writerow(["timestamp", "inst", "name", "open", "high", "low", "close", "volume", "vwap"])
+
         self._logger.info(f"CandleMaker initialized, writing to {self._csv_file}")
         self._logger.info("writing with header: timestamp, inst, name, open, high, low, close, volume, vwap")
 
@@ -37,7 +39,6 @@ class CandleMaker:
             self._handlers.append(cb)
 
     # ------------------------------------------------------------------
-    # update the fields according to how data is updated from zerodha quotes
     def handle_quote_to_candle(self, quote: dict):
         self._logger.debug(f"Handling quote: {quote}")
         ts: datetime = quote['ts']
@@ -45,16 +46,17 @@ class CandleMaker:
         name = quote['name']
         ltp = quote['ltp']
         vol = quote.get('ltq') or quote.get('last_quantity') or quote.get('volume') or 0
+
         candle_time = ts.replace(second=0, microsecond=0)
         candle_time = candle_time.replace(minute=(candle_time.minute // 5) * 5)
+
         current = self._current.get(inst)
+
         if current is None or current['timestamp'] != candle_time:
             if current:
                 self._logger.debug(f"Finalizing candle for {inst} at {current['timestamp']}")
-                # Finalize the previous candle
                 self._finalize(inst, current)
                 self._logger.debug(f"Creating new candle for {inst} at {candle_time}")
-            # Create a new candle
             current = {
                 'timestamp': candle_time,
                 'open': ltp,
@@ -69,6 +71,7 @@ class CandleMaker:
             current['low'] = min(current['low'], ltp)
             current['close'] = ltp
             current['volume'] += vol
+
         self._vwap_data[inst]['cum_tp_vol'] += ltp * vol
         self._vwap_data[inst]['cum_vol'] += vol
         self._current[inst] = current
@@ -79,6 +82,7 @@ class CandleMaker:
         cum_vol = self._vwap_data[inst]['cum_vol']
         vwap = round(cum_tp_vol / cum_vol, 2) if cum_vol else None
         candle['vwap'] = vwap
+
         # Write to CSV
         with open(self._csv_file, 'a', newline='') as f:
             writer = csv.writer(f)
@@ -93,30 +97,15 @@ class CandleMaker:
                 candle['volume'],
                 vwap,
             ])
+
         self._logger.info(f"Finalized candle for {inst} at {candle['timestamp']}")
-        # notify handlers
+
+        # notify handlers (e.g., strategy)
         for cb in self._handlers:
             cb(candle['name'], candle)
 
-    # not called yet
-    def plot_ohlc_vwap(self, inst: str, name: str = None):
-        """Plot OHLC and VWAP for a given instrument and save to data/graphs/."""
-        df = pd.read_csv(self._csv_file)
-        df = df[df['inst'] == int(inst)]
-        if df.empty:
-            self._logger.warning(f"No candle data for {inst}")
-            return
-        df['timestamp'] = pd.to_datetime(df['timestamp'])
-        plt.figure(figsize=(12, 6))
-        plt.plot(df['timestamp'], df['close'], label='Close', color='blue')
-        plt.plot(df['timestamp'], df['vwap'], label='VWAP', color='orange')
-        plt.fill_between(df['timestamp'], df['low'], df['high'], color='gray', alpha=0.2, label='High-Low')
-        plt.title(f"OHLC + VWAP for {name or inst}")
-        plt.xlabel("Time")
-        plt.ylabel("Price")
-        plt.legend()
-        fname = f"{name or inst}_ohlc_vwap.png"
-        fpath = os.path.join(DATA_GRAPH_DIR, fname)
-        plt.savefig(fpath)
-        plt.close()
-        self._logger.info(f"Saved OHLC+VWAP graph to {fpath}")
+    # ------------------------------------------------------------------
+    def reset_vwap(self, inst):
+        """Reset VWAP tracking for a new session if needed."""
+        self._logger.info(f"Resetting VWAP for {inst}")
+        self._vwap_data[inst] = {"cum_tp_vol": 0.0, "cum_vol": 0.0}

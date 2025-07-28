@@ -97,36 +97,16 @@ def build():
         ltp = quote['ltp']
         timestamp = quote.get('timestamp', datetime.now())
         volume = quote.get('volume', 0)
-        exit_mgr.vwap_on_quote(name, ltp, volume, timestamp)
-        # order_mgr.update_ltp(name, ltp, timestamp)  ## Update this through vwap strategy
+        order_mgr.update_ltp(name, ltp, timestamp) 
+        
 
     # Handler for new candles: let strategy decide and create orders
     def handle_candle(name, candle):
         entry_strategy.on_candle(name, candle)
+        order_mgr.update_candle(name, candle)  # Update order manager with new candle data
         
         ## TODO: add candles to data visualisation classes
         
-        # pos = strategy.positions.get(name)
-        # if pos:
-        #     existing_order = order_mgr.get_order(name)
-        #     if existing_order:
-        #         if existing_order.get_side() != pos['side']:
-        #             order_mgr.remove_order(name, candle['timestamp'], "DIRECTION_SWITCH", candle['close'])
-        #     if not order_mgr.has_order(name):
-        #         order = order_mgr.create_order(
-        #             timestamp=pos['entry_time'],
-        #             name=name,
-        #             instrument=cfg['name_symbol'][name] if isinstance(cfg['name_symbol'], dict) else cfg['name_symbol'],
-        #             step=[s[0] for s in pos['steps']],
-        #             trail=[cfg.get('exit_max_pct', 0.01)]*len(pos['steps']),
-        #             side=pos['side'],
-        #             candle=candle,
-        #             quantity=pos['quantity']
-        #         )
-        #         # Route order entry through Execute
-        #         if order:
-        #             direction = "B" if order.get_side() == "BUY" else "S"
-        #             execer.execute_order(order.instrument, direction, pos['entry_time'])
 
     logger.info("Registering handlers for quotes and candles...")
     streamer.register_handler(handle_quote)
