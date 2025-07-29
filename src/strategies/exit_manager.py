@@ -1,39 +1,32 @@
 from datetime import datetime
 from typing import Dict
 from src.logger_factory import get_logger
-from src.strategies.vwap_strategy import Trade  # assuming Trade is in separate file
 import csv
 from dataclasses import asdict
 
 
 class ExitManager:
+    """ Takes input of OrderObject and provides exit signals on it"""
     def __init__(self, 
                  exit_steps=None,
-                 exit_max_pct: float = 0.05,
+                 reterival_exit: float = 0.05,
                  default_quantity: int = 75,
-                 market_close=None,
-                 output_file: str = "trades.csv"):
+                 market_close=None):
         
-        self.exit_steps = exit_steps or [(0.05, 0.3), (0.08, 0.3), (0.12, 0.3)]
-        self.exit_max_pct = exit_max_pct
+        self.exit_steps = exit_steps
+        self.reterival_exit = reterival_exit
         self.default_quantity = default_quantity
         self.market_close = market_close
-        self.output_file = output_file
+        self._handlers = []
 
         self._logger = get_logger("ExitManager")
-        self._init_output_file()
 
-    def _init_output_file(self):
-        with open(self.output_file, 'w', newline='') as f:
-            writer = csv.writer(f)
-            writer.writerow([
-                'symbol', 'name', 'side', 'entry_time', 'entry_price',
-                'entry_open', 'entry_close', 'entry_vwap',
-                'exit_time', 'exit_price', 'exit_type',
-                'pnl', 'pnl_pct'
-            ])
-        self._logger.info(f"ExitManager initialized with output file: {self.output_file}")
 
+    def register_handler(self, cb):
+        if callable(cb):
+            self._logger.debug(f"Registering handler {cb.__name__}")
+            self._handlers.append(cb)
+            
     def manage_position(self, symbol: str, price: float, vwap: float,
                         current_time: datetime, timestamp: datetime, 
                         positions: Dict[str, dict]):
@@ -115,40 +108,19 @@ class ExitManager:
         retrace = ((position['max_profit_price'] - price) / position['max_profit_price']) if side == 'BUY' \
             else ((price - position['min_profit_price']) / position['min_profit_price'])
 
-        if retrace >= self.exit_max_pct:
+        if retrace >= self.reterival_exit:
             self._exit_position(symbol, price, timestamp, 'TRAIL', position, position['remaining_qty'])
             return True
         return False
 
     def _exit_position(self, symbol: str, price: float, timestamp: datetime,
                       exit_type: str, position: dict, qty: int):
-        """Record trade on exit."""
         side = position['side']
         entry_price = position['entry_price']
 
         pnl = (price - entry_price) * qty if side == 'BUY' else (entry_price - price) * qty
         pnl_pct = (pnl / (entry_price * qty)) * 100 if qty > 0 else 0
+        
 
-        trade = Trade(
-            symbol=symbol,
-            name=position['name'],
-            side=side,
-            entry_time=position['entry_time'],
-            entry_price=entry_price,
-            entry_open=position['entry_open'],
-            entry_close=position['entry_close'],
-            entry_vwap=position['entry_vwap'],
-            exit_time=timestamp,
-            exit_price=price,
-            exit_type=exit_type,
-            pnl=round(pnl, 2),
-            pnl_pct=round(pnl_pct, 2)
-        )
-
-        self._record_trade(trade)
         self._logger.info(f"EXIT {side} {symbol} @ {price} | P&L: {pnl:.2f} ({pnl_pct:.2f}%) | Qty: {qty} | Reason: {exit_type}")
 
-    def _record_trade(self, trade: Trade):
-        with open(self.output_file, 'a', newline='') as f:
-            writer = csv.DictWriter(f, fieldnames=vars(trade).keys())
-            writer.writerow(asdict(trade))

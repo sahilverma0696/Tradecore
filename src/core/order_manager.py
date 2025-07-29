@@ -33,6 +33,7 @@ class OrderManager:
             return None
 
     # ------------------------------------------------------------------
+    ## TODO: correct this, this is an internal method, not public API, this creates an order, and keeps it in memory
     def create_order(self, timestamp: datetime, name: str, instrument: str, step, trail, side: str, candle=None, quantity=None):
         # Ensure only one direction per instrument
         existing_order = self._orders.get(name)
@@ -40,7 +41,10 @@ class OrderManager:
             if existing_order.get_side() != side:
                 # Remove existing order before new direction
                 self._logger.info(f"Switching direction for order {name} from {existing_order.get_side()} to {side}")
-                self.remove_order(name, timestamp, "DIRECTION_SWITCH", candle['close'] if candle else 0)
+                opposite_order =self.remove_order(name, timestamp, "DIRECTION_SWITCH", candle['close'] if candle else 0)
+                if opposite_order:
+                    for cb in self._handlers:
+                        cb(name, opposite_order) ## TODO: check if name or instrument should be used
             else:
                 self._logger.warning(f"Order {name} already exists with same direction, not creating a new one.")
                 return existing_order
@@ -68,7 +72,7 @@ class OrderManager:
             )
             self._order_logger.log_exit(order, exit_reason, exit_price)
         return order
-    
+
     def has_order(self, name: str) -> bool:
         return name in self._orders
 

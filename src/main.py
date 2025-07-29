@@ -49,10 +49,9 @@ def build():
     logger.info("Initializing ExitManager...")
     exit_mgr = ExitManager(
         exit_steps=cfg.get('exit_steps'),
-        exit_max_pct=cfg.get('exit_max_pct', 0.05),
-        default_quantity=cfg.get('default_quantity', 75),
+        reterival_exit=cfg.get('reterival_exit'),
+        default_quantity=cfg.get('default_quantity'),
         market_close=cfg.get('market_close'),
-        output_file=cfg.get('output_file', "trades.csv")
     )
     logger.info("ExitManager initialized.")
     
@@ -88,6 +87,8 @@ def build():
     quote_db = QuoteDatabase(symbol=cfg.get('name_symbol'))
     logger.info("QuoteDatabase initialized.")
 
+
+
     # Handler for new quotes: save to DB, send to CandleMaker, and to strategy for exit logic
     def handle_quote(quote):
         
@@ -97,7 +98,9 @@ def build():
         ltp = quote['ltp']
         timestamp = quote.get('timestamp', datetime.now())
         volume = quote.get('volume', 0)
+        
         order_mgr.update_ltp(name, ltp, timestamp) 
+        
         
 
     # Handler for new candles: let strategy decide and create orders
@@ -108,10 +111,17 @@ def build():
         ## TODO: add candles to data visualisation classes
         
 
+
+
     logger.info("Registering handlers for quotes and candles...")
     streamer.register_handler(handle_quote)
     streamer.register_handler(candle_maker.handle_quote_to_candle)
     candle_maker.register_handler(handle_candle)
+    
+    entry_strategy.register_handler(order_mgr.get_signal)
+    exit_mgr.register_handler(order_mgr.get_signal)
+    order_mgr.register_handler(execer.execute_order)
+    logger.info("Handlers registered successfully.")
     logger.info("Initializing Kite with access token...")
     streamer.init_kite(cfg.get('access_token'))
 
