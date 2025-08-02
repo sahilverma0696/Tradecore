@@ -3,6 +3,7 @@ from datetime import datetime
 from src.logger_factory import get_logger
 from src.core.order_object import OrderObject
 from src.core.order_logger import OrderLogger
+import traceback
 
 class OrderManager:
     """Manages active orders and delegates logging."""
@@ -58,7 +59,7 @@ class OrderManager:
             try:
                 self._handlers(name=name, order=order, timestamp=timestamp)
             except Exception as cb_err:
-                self._logger.error(f"_handlers error: {cb_err}")
+                self._logger.error(f"_handlers error: {cb_err}\n{traceback.format_exc()}")
         return order
 
     def remove_order(self, name: str, timestamp: datetime, exit_reason: str, exit_price: float):

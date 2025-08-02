@@ -1,6 +1,7 @@
 import csv
 import os
 from datetime import datetime
+import traceback
 from src.logger_factory import get_logger
 
 class OrderLogger:
@@ -32,15 +33,18 @@ class OrderLogger:
 
     # ------------------------------------------------------------------
     def _write(self, order, action: str, price: float, reason: str):
-        with open(self._path, 'a', newline='') as f:
-            writer = csv.writer(f)
-            writer.writerow([
-                datetime.now().isoformat(sep=' ', timespec='seconds'),
-                order.get_name(),
-                order.get_instrument(),
-                order.get_side(),
-                action,
-                price,
-                reason,
-            ])
-        self._logger.debug(f"Logged {action} for {order.get_name()} reason={reason} price={price}")
+        try:
+            with open(self._path, 'a', newline='') as f:
+                writer = csv.writer(f)
+                writer.writerow([
+                    datetime.now().isoformat(sep=' ', timespec='seconds'),
+                    order.get_name(),
+                    order.get_instrument(),
+                    order.get_side(),
+                    action,
+                    price,
+                    reason,
+                ])
+            self._logger.debug(f"Logged {action} for {order.get_name()} reason={reason} price={price}")
+        except Exception as e:
+            self._logger.error(f"OrderLogger write error: {e}\n{traceback.format_exc()}")

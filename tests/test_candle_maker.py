@@ -1,6 +1,6 @@
 import unittest
 from datetime import datetime
-from src.core.candle_maker import CandleMaker
+from src.core.candle.candle_maker import CandleMaker
 
 class TestCandleMaker(unittest.TestCase):
     def test_handle_quote_and_finalize(self):

@@ -3,11 +3,12 @@ from datetime import datetime
 import threading
 import time
 from typing import Callable, List
+import traceback
 
 from kiteconnect import KiteConnect, KiteTicker
 
 from src.logger_factory import get_logger
-from src.core.executioner import Execute
+from src.execute.zerodha_executioner import ZerodhaExecute
 
 class ZerodhaStreamer:
     def __init__(
@@ -28,7 +29,7 @@ class ZerodhaStreamer:
         self._ticker: KiteTicker | None = None
         self._handlers: List[Callable[[dict], None]] = []
         self._paper = paper_trade
-        self._exec: Execute | None = None
+        self._exec: ZerodhaExecute | None = None
         self._last_second: dict[int, str] = {}
 
     # ------------------------------------------------------------------
@@ -47,7 +48,7 @@ class ZerodhaStreamer:
             req = input("Enter request token: ")
             sess = self._kite.generate_session(req, api_secret=self.api_secret)
             self._kite.set_access_token(sess["access_token"])
-        self._exec = Execute(self._kite, paper_trade=self._paper, logger=self._logger)
+        self._exec = ZerodhaExecute(self._kite, paper_trade=self._paper, logger=self._logger)
 
     # ------------------------------------------------------------------
     def get_kite(self):
@@ -83,7 +84,7 @@ class ZerodhaStreamer:
                 try:
                     cb(compat_quote)
                 except Exception as e:
-                    self._logger.error(f"handler error: {e}")
+                    self._logger.error(f"handler error: {e}\n{traceback.format_exc()}")
 
     def _on_connect(self, ws, response):
         self._logger.info("Ticker connected. Subscribing to symbols ...")

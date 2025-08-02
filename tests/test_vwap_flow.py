@@ -50,7 +50,7 @@ class TestVWAPFlow(unittest.TestCase):
         )
         self.assertTrue(self.order_mgr.has_order(self.symbol))
 
-        # Simulate order placement via Execute (mock)
+        # Simulate order placement via ZerodhaExecute (mock)
         class DummyClient:
             def place_order(self, **kwargs):
                 return True
@@ -60,8 +60,8 @@ class TestVWAPFlow(unittest.TestCase):
             TRANSACTION_TYPE_SELL = "SELL"
             ORDER_TYPE_MARKET = "MARKET"
             PRODUCT_MIS = "MIS"
-        from src.core.executioner import Execute
-        execer = Execute(logger=None, excel_logger=None, expiry=None, client=DummyClient())
+        from src.execute.zerodha_executioner import ZerodhaExecute
+        execer = ZerodhaExecute(logger=None, excel_logger=None, expiry=None, client=DummyClient())
         direction = "B" if order.get_side() == "BUY" else "S"
         result = execer.execute_order(order.instrument, direction, pos['entry_time'])
         self.assertTrue(result)

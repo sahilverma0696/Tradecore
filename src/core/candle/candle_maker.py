@@ -4,6 +4,7 @@ from datetime import datetime
 from collections import defaultdict
 from src.logger_factory import get_logger
 import os
+import traceback
 
 import matplotlib.pyplot as plt
 import pandas as pd
@@ -98,11 +99,14 @@ class CandleMaker:
                 vwap,
             ])
 
-        self._logger.info(f"Finalized candle for {inst} at {candle['timestamp']}")
+        self._logger.info(f"Finalized candle for {inst} at {candle['timestamp']} with VWAP {candle['vwap']}")
 
         # notify handlers (e.g., strategy)
         for cb in self._handlers:
-            cb(candle['name'], candle)
+            try:
+                cb(candle['name'], candle)
+            except Exception as e:
+                self._logger.error(f"Candle handler error: {e}\n{traceback.format_exc()}")
 
     # ------------------------------------------------------------------
     def reset_vwap(self, inst):

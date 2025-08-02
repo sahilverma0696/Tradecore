@@ -1,10 +1,11 @@
 from datetime import datetime
 import time
 import json
+import traceback
 from src.logger_factory import get_logger
 from src.config_manager import ConfigManager
 
-class Execute:
+class ZerodhaExecute:
     def __init__(self, excel_logger, expiry, client):
         self.config_manager = ConfigManager()
         self.config_manager.register_watcher(self._config_updated)
@@ -20,7 +21,7 @@ class Execute:
         self.max_retries = self.execution_config.get('max_retries', 2)
         self.retry_delay = self.execution_config.get('retry_delay', 1)
         
-        self.logger = get_logger("Execute")  # An instance of Logger to log messages
+        self.logger = get_logger("ZerodhaExecute")  # An instance of Logger to log messages
         self.excel_logger = excel_logger  # An instance of ExcelTradeLogger for logging trades
         self.expiry = expiry  # Expiry date for options
         self.state = None  # Track current trade direction ('long' or 'short')
@@ -28,12 +29,12 @@ class Execute:
         self.closed_trades = []  # List to store last closed positions
         self.client = client
 
-        print(f"\nInitializing Execute with configuration:")
+        print(f"\nInitializing ZerodhaExecute with configuration:")
         print(f"Delta SELL: {self.delta_sell}")
         print(f"Delta BUY: {self.delta_buy}")
         
         if self.logger:
-            self.logger.debug(f"INIT Execute - Delta SELL: {self.delta_sell}, Delta BUY: {self.delta_buy}, Max Retries: {self.max_retries}, Retry Delay: {self.retry_delay}")
+            self.logger.debug(f"INIT ZerodhaExecute - Delta SELL: {self.delta_sell}, Delta BUY: {self.delta_buy}, Max Retries: {self.max_retries}, Retry Delay: {self.retry_delay}")
     
     def _config_updated(self, new_config):
         """Handle config updates"""
@@ -48,11 +49,11 @@ class Execute:
             self.retry_delay = execution_config.get('retry_delay', self.retry_delay)
             
             if old_delta_sell != self.delta_sell or old_delta_buy != self.delta_buy:
-                print(f"\nExecute configuration updated:")
+                print(f"\nZerodhaExecute configuration updated:")
                 print(f"delta_sell: {old_delta_sell} -> {self.delta_sell}")
                 print(f"delta_buy: {old_delta_buy} -> {self.delta_buy}")
                 if self.logger:
-                    self.logger.debug(f"Execute config updated - delta_sell: {self.delta_sell}, delta_buy: {self.delta_buy}")
+                    self.logger.debug(f"ZerodhaExecute config updated - delta_sell: {self.delta_sell}, delta_buy: {self.delta_buy}")
     
     def get_quantity(self, symbol):
         """Get quantity for a symbol from config"""
@@ -94,7 +95,7 @@ class Execute:
                 return True
                 
             except Exception as e:
-                self.logger.debug(f"Error placing order for {symbol}: {str(e)}")
+                self.logger.debug(f"Error placing order for {symbol}: {str(e)}\n{traceback.format_exc()}")
                 if attempt < self.max_retries - 1:
                     time.sleep(self.retry_delay)
                     self.logger.debug(f"Retrying... ({attempt + 1}/{self.max_retries})")
@@ -103,5 +104,5 @@ class Execute:
         return False
     
     def execute_order(self, symbol, direction, timestamp):
-        """Execute an order based on symbol and direction"""
+        """ZerodhaExecute an order based on symbol and direction"""
         return self.place_order(symbol, direction, timestamp)

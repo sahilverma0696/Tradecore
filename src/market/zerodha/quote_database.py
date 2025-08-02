@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Dict, Any, Optional, List
 import json
 from src.logger_factory import get_logger
+import traceback
 
 
 def get_ist_date_string() -> str:
@@ -104,7 +105,7 @@ class QuoteDatabase:
                 return True
                 
         except Exception as e:
-            self._logger.error(f"Error saving quote: {e}")
+            self._logger.error(f"Error saving quote: {e}\n{traceback.format_exc()}")
             return False
     
     def get_latest_quote(self, instrument_token: int) -> Optional[Dict[str, Any]]:

@@ -2,6 +2,7 @@ import json
 import os
 import threading
 import time
+import traceback
 from typing import Callable, Dict, List
 
 from src.logger_factory import get_logger
@@ -21,7 +22,9 @@ class ConfigManager:
         threading.Thread(target=self._watch_loop, daemon=True).start()
 
     def get(self) -> Dict:
-        return self._config
+        # Return only the config for the selected market
+        market = self._config.get("market", "zerodha")
+        return self._config.get(market, {})
 
     def register_watcher(self, cb: Callable[[Dict], None]):
         if callable(cb):
@@ -34,7 +37,7 @@ class ConfigManager:
             try:
                 self._maybe_reload()
             except Exception as e:
-                self._logger.error(f"Watch loop error: {e}")
+                self._logger.error(f"Watch loop error: {e}\n{traceback.format_exc()}")
             time.sleep(POLL_INTERVAL)
 
     def _maybe_reload(self):
@@ -54,6 +57,6 @@ class ConfigManager:
                 try:
                     cb(self._config)
                 except Exception as e:
-                    self._logger.error(f"Watcher error: {e}")
+                    self._logger.error(f"Watcher error: {e}\n{traceback.format_exc()}")
         except Exception as e:
-            self._logger.error(f"Failed loading config: {e}")
+            self._logger.error(f"Failed loading config: {e}\n{traceback.format_exc()}")

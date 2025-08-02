@@ -1,14 +1,22 @@
-"""High-level wiring for VWAP trading system."""
+"""High-level wiring for VWAP trading system.
+
+Usage:
+- To use Zerodha, set "market": "zerodha" in trading_config.json.
+- To use Binance, set "market": "binance" in trading_config.json.
+- Each market has its own config section in trading_config.json.
+"""
+
 from datetime import datetime
 from src.logger_factory import get_logger
 from src.config_manager import ConfigManager
-from src.core.candle_maker import CandleMaker
+from src.core.candle.candle_factory import get_candle_maker
 from src.core.order_manager import OrderManager
-from src.core.executioner import Execute
+from src.execute.execute_factory import get_execute
 from src.strategies.vwap_strategy import VwapStrategy
 from src.strategies.exit_manager import ExitManager
-from src.market.zerodha.zerodha_streamer import ZerodhaStreamer
-from src.market.zerodha.quote_database import QuoteDatabase
+from src.system_config import get_streamer
+import os
+import traceback
 
 logger = get_logger("MAIN")
 
@@ -25,13 +33,22 @@ def build():
     if not cfg:
         logger.error("Configuration is empty or invalid. Exiting.")
         return
-    
-    
+
+    # --- streamer first ---
+    logger.info("Initializing streamer...")
+    if not cfg.get('symbols'):
+        logger.error("No symbols configured for streamer. Exiting.")
+        return
+    market = cfg.get('market', 'zerodha')
+    logger.info(f"Selected market: {market}")
+    streamer = get_streamer(cfg)
+    logger.info(f"{market.capitalize()} streamer initialized.")
+
     # Initialize core components
     logger.info("Initializing core components...")
-    # Initialize candle maker
-    candle_maker = CandleMaker()
-    logger.info("CandleMaker initialized.")
+    # Initialize candle maker using factory
+    candle_maker = get_candle_maker(cfg)
+    logger.info(f"CandleMaker initialized: {type(candle_maker).__name__}")
     
     
     # Initialize order manager and strategy
@@ -57,24 +74,13 @@ def build():
     
 
 
-    # --- streamer first ---
-    logger.info("Initializing ZerodhaStreamer...")
-    # Initialize ZerodhaStreamer with configuration
-    logger.info(f"Connecting to Zerodha with symbols: {cfg['symbols']}")
-    if not cfg.get('symbols'):
-        logger.error("No symbols configured for ZerodhaStreamer. Exiting.")
-        return
-    streamer = ZerodhaStreamer(
-        symbols=[int(s) for s in cfg['symbols']],
-        api_key=cfg['api_key'],
-        api_secret=cfg['api_secret'],
-        name_symbol=cfg['name_symbol'],
-        paper_trade=cfg.get('paper_trade', True),
-    )
-    logger.info("ZerodhaStreamer initialized.")
-    # Initialize executioner
+    # Initialize executioner using factory
     logger.info("Initializing executioner...")
-    execer = Execute(excel_logger=None, expiry=None, client=streamer.get_kite())
+    try:
+        execer = get_execute(cfg, streamer)
+    except Exception as e:
+        logger.error(f"Failed to initialize executioner: {e}")
+        return
     logger.info("Executioner initialized.")
     
     order_mgr.register_handler(
@@ -84,24 +90,24 @@ def build():
     
     # Initialize quote database
     logger.info("Initializing QuoteDatabase...")
-    quote_db = QuoteDatabase(symbol=cfg.get('name_symbol'))
+    # quote_db = QuoteDatabase(symbol=cfg.get('name_symbol'))
     logger.info("QuoteDatabase initialized.")
 
 
 
     # Handler for new quotes: save to DB, send to CandleMaker, and to strategy for exit logic
     def handle_quote(quote):
+        logger.debug(f"handle_quote received: {quote}")  # <-- Add logging
         
-        quote_db.save_quote(quote)  # Save the full quote to the database
+        # quote_db.save_quote(quote)  # Save the full quote to the database
         
         name = quote['name']
         ltp = quote['ltp']
         timestamp = quote.get('timestamp', datetime.now())
         volume = quote.get('volume', 0)
-        
         order_mgr.update_ltp(name, ltp, timestamp) 
         
-        
+
 
     # Handler for new candles: let strategy decide and create orders
     def handle_candle(name, candle):
@@ -114,6 +120,7 @@ def build():
 
 
     logger.info("Registering handlers for quotes and candles...")
+    # Register handlers for quotes and candles
     streamer.register_handler(handle_quote)
     streamer.register_handler(candle_maker.handle_quote_to_candle)
     candle_maker.register_handler(handle_candle)
@@ -122,14 +129,24 @@ def build():
     exit_mgr.register_handler(order_mgr.get_signal)
     order_mgr.register_handler(execer.execute_order)
     logger.info("Handlers registered successfully.")
-    logger.info("Initializing Kite with access token...")
-    streamer.init_kite(cfg.get('access_token'))
+    market = cfg.get('market', 'zerodha')  # <-- Add this line to define 'market'
 
+    if market == 'zerodha':
+        logger.info("Initializing Kite with access token...")
+        streamer.init_kite(cfg.get('access_token'))
+    elif market == 'binance':
+        logger.info("Binance selected: no init_kite required.")
 
     logger.info("Starting system...")
     streamer.start()
-
     logger.info("System initialised – streaming started")
+
+    # Wait for Binance streamer thread to finish if market is binance
+    if market == 'binance':
+        if hasattr(streamer, '_thread') and streamer._thread is not None:
+            logger.info("Waiting for Binance streamer thread to finish...")
+            streamer._thread.join()
+            logger.info("Binance streamer thread finished.")
 
 
 if __name__ == "__main__":
@@ -152,4 +169,7 @@ if __name__ == "__main__":
     2. Paper trading mode
     3. Backtesting mode
     '''
-    build()
+    try:
+        build()
+    except Exception as e:
+        logger.error(f"Uncaught exception in main: {e}\n{traceback.format_exc()}")
