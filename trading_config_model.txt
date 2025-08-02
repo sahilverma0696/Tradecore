@@ -5,7 +5,7 @@
   "delta_sell": 0.02, // delta for selling PE diff from nifty
   "delta_buy": 0.04,  // delta for buying PE diff from nifty, not needed
   "max_retries": 3,  // max retries for placing an market order
-  "retry_delay": 50   // delay in micro-seconds between retries
+  "retry_delay": 50,   // delay in micro-seconds between retries
   "exit_steps": [
     [0.02, 0.3],
     [0.04, 0.3],

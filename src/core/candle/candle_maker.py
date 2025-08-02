@@ -8,6 +8,7 @@ import traceback
 
 import matplotlib.pyplot as plt
 import pandas as pd
+from src.core.plotting.candle_plotter import CandlePlotter
 
 DATA_CANDLE_DIR = "data/candles"
 DATA_GRAPH_DIR = "data/graphs"
@@ -113,3 +114,11 @@ class CandleMaker:
         """Reset VWAP tracking for a new session if needed."""
         self._logger.info(f"Resetting VWAP for {inst}")
         self._vwap_data[inst] = {"cum_tp_vol": 0.0, "cum_vol": 0.0}
+
+    # ------------------------------------------------------------------
+    def register_plotting_handler(self):
+        self._plotter = CandlePlotter()
+        def plotting_handler(name, candle):
+            self._plotter.add_candle(name, candle)
+            self._plotter.plot()
+        self.register_handler(plotting_handler)

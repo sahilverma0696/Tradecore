@@ -63,7 +63,7 @@ class ZerodhaStreamer:
 
             # Store the complete tick as received
             try:
-                from .quote_database import QuoteDatabase
+                from ...data_store.quote_database import QuoteDatabase
                 db = QuoteDatabase()
                 db.save_quote(t)  # Save the full tick dictionary
             except Exception as e:

@@ -15,6 +15,8 @@ from src.execute.execute_factory import get_execute
 from src.strategies.vwap_strategy import VwapStrategy
 from src.strategies.exit_manager import ExitManager
 from src.system_config import get_streamer
+from src.data_store.quote_database_factory import get_quote_database
+from src.core.plotting.candle_plotter import CandlePlotter
 import os
 import traceback
 
@@ -88,19 +90,18 @@ def build():
     )  # Register order creation handler with executioner
     logger.info("OrderManager handler registered with Executioner.")
     
-    # Initialize quote database
+    # Initialize quote database using factory
     logger.info("Initializing QuoteDatabase...")
-    # quote_db = QuoteDatabase(symbol=cfg.get('name_symbol'))
+    quote_db = get_quote_database(cfg)
     logger.info("QuoteDatabase initialized.")
 
-
+    # Initialize the plotter
+    plotter = CandlePlotter(max_candles=100)
 
     # Handler for new quotes: save to DB, send to CandleMaker, and to strategy for exit logic
     def handle_quote(quote):
-        logger.debug(f"handle_quote received: {quote}")  # <-- Add logging
-        
-        # quote_db.save_quote(quote)  # Save the full quote to the database
-        
+        logger.debug(f"handle_quote received: {quote}")
+        quote_db.save_quote(quote)  # Save the full quote to the database
         name = quote['name']
         ltp = quote['ltp']
         timestamp = quote.get('timestamp', datetime.now())
@@ -113,6 +114,9 @@ def build():
     def handle_candle(name, candle):
         entry_strategy.on_candle(name, candle)
         order_mgr.update_candle(name, candle)  # Update order manager with new candle data
+        
+        # Add candle to plotter
+        plotter.add_candle(name, candle)
         
         ## TODO: add candles to data visualisation classes
         
@@ -141,12 +145,21 @@ def build():
     streamer.start()
     logger.info("System initialised – streaming started")
 
+    # For static plot (after collecting candles)
+    # plotter.plot()
+
+    # For live plot (if you want real-time updates)
+    plotter.start_live_plot()
+
     # Wait for Binance streamer thread to finish if market is binance
     if market == 'binance':
         if hasattr(streamer, '_thread') and streamer._thread is not None:
             logger.info("Waiting for Binance streamer thread to finish...")
             streamer._thread.join()
             logger.info("Binance streamer thread finished.")
+        # Optionally stop DB thread
+        if hasattr(quote_db, 'stop'):
+            quote_db.stop()
 
 
 if __name__ == "__main__":
