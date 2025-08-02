@@ -1,23 +1,32 @@
 from datetime import datetime
 from src.logger_factory import get_logger
 
+
+
 class OrderObject:
     def __init__(self, name, instrument, step, trail, side, candle=None):
+        self.logger = get_logger(f"InitOrderObject-{name}")
         self.name = name
         self.instrument = instrument
         self.side = side.upper()  # 'BUY' or 'SELL'
-        self.step = step or []
-        self.trail = trail or []
+        self.step = step or []          # going with step profits, same as step trail
+        self.trail = trail or []        # going with step trail, same as step profits 
         self.current_step_idx = 0
-        self.current_step = self.step[0] if self.step else 0.7
-        self.current_trail = self.trail[0] if self.trail else 0.1
+        self.current_step = self.step[0] if self.step else 0.05
+        self.current_trail = self.trail[0] if self.trail else 0.03
         self.current_candle = candle
         self.ltp = 0
-        self.position_size = 1.0
-        self.filled_steps = set()
+        self.filled_steps = set()  # TODO: maybe not the best way, the idea is to track which steps have been filled
+        self.total_quantity = 0  # total quantity filled in this order
+        self.lots = 1.0     # total_quantity * lots, used for position sizing
+        
+        self.logger.debug(f"Creating OrderObject: {name}, Instrument: {instrument}, Side: {side}, Step: {self.step}, Trail: {self.trail}")
+        
 
         # Entry & timestamps
         self.entry_price = candle['close'] if candle and 'close' in candle else 0
+        if self.entry_price == 0:
+            self.logger.warning(f"Entry price is 0 for order {name}, please check the candle data.")
         self.entry_time = datetime.now()
         self.last_update_time = self.entry_time
         self._timestamp = self.entry_time
@@ -25,14 +34,19 @@ class OrderObject:
         # Price tracking
         self.min_price = self.entry_price if self.entry_price > 0 else 0
         self.max_price = self.entry_price if self.entry_price > 0 else 0
+        if(self.min_price == 0 or self.max_price == 0):
+            self.logger.warning(f"Min/Max price initialized to 0 for order {name}, please check the entry price.")
+        self.logger.debug(f"OrderObject initialized with entry price: {self.entry_price}, min price: {self.min_price}, max price: {self.max_price}")
+        self.logger.debug(f"OrderObject {name} created with side {self.side}, entry price {self.entry_price}, step {self.step}, trail {self.trail}")
 
         # Performance tracking (NEW)
         self.max_pct = 0.0  # highest favorable movement %
         self.min_pct = 0.0  # worst adverse movement %
         self.retreat = 0.0  # pullback from max
         self.current_pct = 0.0  # current PnL %
+        self.logger.debug(f"OrderObject {name} initialized with max_pct: {self.max_pct}, min_pct: {self.min_pct}, retreat: {self.retreat}, current_pct: {self.current_pct}")
         
-        self.logger = get_logger(f"OrderObject:{self.name}")
+        
 
     # ----------------- setters -----------------
     def set_ltp(self, ltp, timestamp=None):
