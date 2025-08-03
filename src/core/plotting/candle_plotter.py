@@ -46,7 +46,7 @@ class CandlePlotter:
 
     def add_candle(self, name, candle):
         self.candles.append(candle)
-        self._logger.debug(f"Added candle for {name}: {candle}")
+        self._logger.info(f"Plotter data updated for {name}: OHLC({candle['open']:.2f},{candle['high']:.2f},{candle['low']:.2f},{candle['close']:.2f}) VWAP({candle.get('vwap', 'N/A')}) Volume({candle.get('volume', 0)}) Total candles: {len(self.candles)}")
 
     def plot(self):
         df = self._pad_candles()
@@ -61,8 +61,12 @@ class CandlePlotter:
             max_price = max(df['high'][mask].max(), df['vwap'][mask].max())
             padding = (max_price - min_price) * 0.05  # 5% padding
             y_range = [min_price - padding, max_price + padding]
+            self._logger.info(f"Chart range calculated: {y_range[0]:.2f} to {y_range[1]:.2f}")
         else:
             y_range = None
+            self._logger.warning("No valid price data for chart range calculation")
+            
+        # Improved OHLC candlestick chart
         fig.add_trace(go.Candlestick(
             x=df['timestamp'][mask],
             open=df['open'][mask],
@@ -71,23 +75,27 @@ class CandlePlotter:
             close=df['close'][mask],
             name='OHLC',
             increasing=dict(
-                line=dict(color='green'),
-                fillcolor='rgba(0,0,0,0)'  # hollow candle for increasing
+                line=dict(color='#26a69a', width=1),
+                fillcolor='rgba(38, 166, 154, 0.3)'
             ),
             decreasing=dict(
-                line=dict(color='red'),
-                fillcolor='rgba(0,0,0,0)'  # hollow candle for decreasing
+                line=dict(color='#ef5350', width=1),
+                fillcolor='rgba(239, 83, 80, 0.3)'
             )
         ))
+        
+        # VWAP as proper black line
         fig.add_trace(go.Scatter(
             x=df['timestamp'][mask],
             y=df['vwap'][mask],
             mode='lines',
             name='VWAP',
-            line=dict(color='black')
+            line=dict(color='black', width=2),
+            connectgaps=True
         ))
+        
         fig.update_layout(
-            title="OHLC + VWAP",
+            title="OHLC + VWAP Chart",
             xaxis_title="Time",
             yaxis_title="Price",
             xaxis=dict(
@@ -98,10 +106,18 @@ class CandlePlotter:
             ),
             yaxis=dict(
                 range=y_range
-            ) if y_range else {}
+            ) if y_range else {},
+            showlegend=True,
+            legend=dict(
+                orientation="h",
+                yanchor="bottom",
+                y=1.02,
+                xanchor="right",
+                x=1
+            )
         )
         fig.show()
-        self._logger.info("Plotted static OHLC + VWAP chart.")
+        self._logger.info("Static OHLC + VWAP chart displayed successfully.")
 
     def start_live_plot(self, interval=1000):
         app = Dash(__name__)
@@ -118,15 +134,18 @@ class CandlePlotter:
             df = self._pad_candles()
             fig = go.Figure()
             mask = df['open'].notnull()
-            # Calculate y-axis range with padding
+            
             if mask.any():
                 min_price = min(df['low'][mask].min(), df['vwap'][mask].min())
                 max_price = max(df['high'][mask].max(), df['vwap'][mask].max())
-                padding = (max_price - min_price) * 0.05  # 5% padding
+                padding = (max_price - min_price) * 0.05
                 y_range = [min_price - padding, max_price + padding]
+                self._logger.debug(f"Live chart update {n}: range {y_range[0]:.2f} to {y_range[1]:.2f}, {mask.sum()} candles")
             else:
                 y_range = None
+                
             if not df.empty and mask.any():
+                # Improved OHLC candlestick chart
                 fig.add_trace(go.Candlestick(
                     x=df['timestamp'][mask],
                     open=df['open'][mask],
@@ -135,23 +154,27 @@ class CandlePlotter:
                     close=df['close'][mask],
                     name='OHLC',
                     increasing=dict(
-                        line=dict(color='green'),
-                        fillcolor='rgba(0,0,0,0)'  # hollow candle for increasing
+                        line=dict(color='#26a69a', width=1),
+                        fillcolor='rgba(38, 166, 154, 0.3)'
                     ),
                     decreasing=dict(
-                        line=dict(color='red'),
-                        fillcolor='rgba(0,0,0,0)'  # hollow candle for decreasing
+                        line=dict(color='#ef5350', width=1),
+                        fillcolor='rgba(239, 83, 80, 0.3)'
                     )
                 ))
+                
+                # VWAP as proper black line
                 fig.add_trace(go.Scatter(
                     x=df['timestamp'][mask],
                     y=df['vwap'][mask],
                     mode='lines',
                     name='VWAP',
-                    line=dict(color='black')
+                    line=dict(color='black', width=2),
+                    connectgaps=True
                 ))
+                
             fig.update_layout(
-                title="Live OHLC + VWAP",
+                title="Live OHLC + VWAP Chart",
                 xaxis_title="Time",
                 yaxis_title="Price",
                 xaxis=dict(
@@ -162,11 +185,17 @@ class CandlePlotter:
                 ),
                 yaxis=dict(
                     range=y_range
-                ) if y_range else {}
+                ) if y_range else {},
+                showlegend=True,
+                legend=dict(
+                    orientation="h",
+                    yanchor="bottom",
+                    y=1.02,
+                    xanchor="right",
+                    x=1
+                )
             )
             return fig
 
-        self._logger.info(f"Starting live plot with interval={interval} ms on port 8080")
-        app.run(debug=False, port=8080, host='0.0.0.0')
-        self._logger.info(f"Starting live plot with interval={interval} ms on port 8080")
+        self._logger.info(f"Starting live plot server with interval={interval} ms on port 8080")
         app.run(debug=False, port=8080, host='0.0.0.0')

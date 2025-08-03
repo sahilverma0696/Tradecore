@@ -38,7 +38,29 @@ class LiveChartServer:
         self._logger = get_logger("LiveChartServer")
         self.server = None
         self.server_thread = None
+        # Add real-time price tracking
+        self.current_price = None
+        self.current_timestamp = None
+        self.current_volume = 0
         self._logger.info(f"Initialized LiveChartServer with max_candles={max_candles}, port={port}")
+
+    def add_quote(self, quote):
+        """Handle real-time quote updates for immediate price display"""
+        self.current_price = quote.get('ltp')
+        
+        # Handle timestamp conversion - could be datetime object, int (ms), or string
+        ts = quote.get('ts', datetime.now())
+        if isinstance(ts, datetime):
+            self.current_timestamp = ts.isoformat()
+        elif isinstance(ts, (int, float)):
+            # Assume milliseconds timestamp from Binance
+            self.current_timestamp = datetime.fromtimestamp(ts / 1000).isoformat()
+        else:
+            # Fallback to current time
+            self.current_timestamp = datetime.now().isoformat()
+            
+        self.current_volume = quote.get('volume', 0)
+        self._logger.debug(f"Real-time price updated: {self.current_price} at {self.current_timestamp}")
 
     def add_candle(self, name, candle):
         candle_data = {
@@ -52,12 +74,21 @@ class LiveChartServer:
             'name': name
         }
         self.candles.append(candle_data)
-        self._logger.debug(f"Added candle for {name}: OHLC({candle['open']},{candle['high']},{candle['low']},{candle['close']}) VWAP({candle.get('vwap')})")
+        self._logger.info(f"Chart data updated for {name}: Close={candle['close']:.2f}, VWAP={candle.get('vwap', 'N/A')}, Volume={candle.get('volume', 0)}, Total candles={len(self.candles)}")
 
     def get_chart_data(self):
         candles_list = list(self.candles)
         if not candles_list:
-            return {'labels': [], 'ohlc': [], 'vwap': [], 'volume': []}
+            self._logger.debug("No candle data available for chart")
+            return {
+                'labels': [], 
+                'ohlc': [], 
+                'vwap': [], 
+                'volume': [],
+                'current_price': self.current_price,
+                'current_timestamp': self.current_timestamp,
+                'current_volume': self.current_volume
+            }
         
         labels = [c['timestamp'] for c in candles_list]
         ohlc = [{
@@ -67,14 +98,25 @@ class LiveChartServer:
             'l': c['low'],
             'c': c['close']
         } for c in candles_list]
-        vwap = [c['vwap'] for c in candles_list]
+        
+        # Filter out None/null VWAP values and create proper line data
+        vwap = []
+        for c in candles_list:
+            if c['vwap'] is not None:
+                vwap.append({'x': c['timestamp'], 'y': c['vwap']})
+        
         volume = [c['volume'] for c in candles_list]
+        
+        self._logger.debug(f"Chart data prepared: {len(ohlc)} candles, {len(vwap)} VWAP points, {len(volume)} volume bars")
         
         return {
             'labels': labels,
             'ohlc': ohlc,
             'vwap': vwap,
-            'volume': volume
+            'volume': volume,
+            'current_price': self.current_price,
+            'current_timestamp': self.current_timestamp,
+            'current_volume': self.current_volume
         }
 
     def get_html(self):
@@ -95,6 +137,13 @@ class LiveChartServer:
         .stat-item { text-align: center; padding: 10px; background: #f8f9fa; border-radius: 4px; }
         .stat-value { font-size: 18px; font-weight: bold; color: #007bff; }
         .stat-label { font-size: 12px; color: #666; }
+        .vwap-value { color: #000 !important; }
+        .live-price { color: #28a745 !important; animation: pulse 1s infinite; }
+        @keyframes pulse {
+            0% { opacity: 1; }
+            50% { opacity: 0.7; }
+            100% { opacity: 1; }
+        }
     </style>
 </head>
 <body>
@@ -102,11 +151,11 @@ class LiveChartServer:
         <h1>VWAP Trading System - Live Chart</h1>
         <div class="stats" id="stats">
             <div class="stat-item">
-                <div class="stat-value" id="last-price">-</div>
-                <div class="stat-label">Last Price</div>
+                <div class="stat-value live-price" id="last-price">-</div>
+                <div class="stat-label">Live Price</div>
             </div>
             <div class="stat-item">
-                <div class="stat-value" id="vwap-price">-</div>
+                <div class="stat-value vwap-value" id="vwap-price">-</div>
                 <div class="stat-label">VWAP</div>
             </div>
             <div class="stat-item">
@@ -138,14 +187,23 @@ class LiveChartServer:
                     data: [],
                     borderColor: 'rgb(75, 192, 192)',
                     backgroundColor: 'rgba(75, 192, 192, 0.2)',
+                    borderWidth: 1,
+                    color: {
+                        up: '#26a69a',
+                        down: '#ef5350',
+                        unchanged: '#999999'
+                    }
                 }, {
                     label: 'VWAP',
                     type: 'line',
                     data: [],
-                    borderColor: 'rgb(255, 99, 132)',
-                    backgroundColor: 'rgba(255, 99, 132, 0.2)',
+                    borderColor: '#000000',
+                    backgroundColor: 'transparent',
+                    borderWidth: 2,
                     fill: false,
-                    tension: 0.1
+                    tension: 0.1,
+                    pointRadius: 0,
+                    pointHoverRadius: 3
                 }]
             },
             options: {
@@ -157,11 +215,22 @@ class LiveChartServer:
                     x: {
                         type: 'time',
                         time: {
-                            unit: 'minute'
+                            unit: 'minute',
+                            displayFormats: {
+                                minute: 'HH:mm'
+                            }
+                        },
+                        title: {
+                            display: true,
+                            text: 'Time'
                         }
                     },
                     y: {
-                        beginAtZero: false
+                        beginAtZero: false,
+                        title: {
+                            display: true,
+                            text: 'Price'
+                        }
                     }
                 },
                 plugins: {
@@ -170,7 +239,10 @@ class LiveChartServer:
                     },
                     title: {
                         display: true,
-                        text: 'Price Chart with VWAP'
+                        text: 'Price Chart with VWAP',
+                        font: {
+                            size: 16
+                        }
                     }
                 }
             }
@@ -183,7 +255,7 @@ class LiveChartServer:
                 datasets: [{
                     label: 'Volume',
                     data: [],
-                    backgroundColor: 'rgba(54, 162, 235, 0.5)',
+                    backgroundColor: 'rgba(54, 162, 235, 0.6)',
                     borderColor: 'rgba(54, 162, 235, 1)',
                     borderWidth: 1
                 }]
@@ -194,11 +266,22 @@ class LiveChartServer:
                     x: {
                         type: 'time',
                         time: {
-                            unit: 'minute'
+                            unit: 'minute',
+                            displayFormats: {
+                                minute: 'HH:mm'
+                            }
+                        },
+                        title: {
+                            display: true,
+                            text: 'Time'
                         }
                     },
                     y: {
-                        beginAtZero: true
+                        beginAtZero: true,
+                        title: {
+                            display: true,
+                            text: 'Volume'
+                        }
                     }
                 },
                 plugins: {
@@ -207,7 +290,10 @@ class LiveChartServer:
                     },
                     title: {
                         display: true,
-                        text: 'Volume Chart'
+                        text: 'Volume Chart',
+                        font: {
+                            size: 16
+                        }
                     }
                 }
             }
@@ -220,12 +306,8 @@ class LiveChartServer:
                     // Update OHLC data
                     priceChart.data.datasets[0].data = data.ohlc;
                     
-                    // Update VWAP data
-                    const vwapData = data.labels.map((label, index) => ({
-                        x: label,
-                        y: data.vwap[index]
-                    }));
-                    priceChart.data.datasets[1].data = vwapData;
+                    // Update VWAP data - now properly formatted as line data
+                    priceChart.data.datasets[1].data = data.vwap;
                     
                     // Update volume data
                     volumeChart.data.labels = data.labels;
@@ -234,24 +316,36 @@ class LiveChartServer:
                     priceChart.update('none');
                     volumeChart.update('none');
                     
-                    // Update stats
-                    if (data.ohlc.length > 0) {
+                    // Update stats with real-time data
+                    if (data.current_price !== null && data.current_price !== undefined) {
+                        document.getElementById('last-price').textContent = data.current_price.toFixed(2);
+                    } else if (data.ohlc.length > 0) {
                         const lastCandle = data.ohlc[data.ohlc.length - 1];
-                        const lastVwap = data.vwap[data.vwap.length - 1];
-                        const lastVolume = data.volume[data.volume.length - 1];
-                        
                         document.getElementById('last-price').textContent = lastCandle.c?.toFixed(2) || '-';
-                        document.getElementById('vwap-price').textContent = lastVwap?.toFixed(2) || '-';
-                        document.getElementById('volume').textContent = lastVolume || '-';
-                        document.getElementById('candle-count').textContent = data.ohlc.length;
                     }
+                    
+                    if (data.vwap.length > 0) {
+                        const lastVwap = data.vwap[data.vwap.length - 1].y;
+                        document.getElementById('vwap-price').textContent = lastVwap?.toFixed(2) || '-';
+                    }
+                    
+                    if (data.current_volume !== null && data.current_volume !== undefined) {
+                        document.getElementById('volume').textContent = data.current_volume;
+                    } else if (data.volume.length > 0) {
+                        const lastVolume = data.volume[data.volume.length - 1];
+                        document.getElementById('volume').textContent = lastVolume || '-';
+                    }
+                    
+                    document.getElementById('candle-count').textContent = data.ohlc.length;
                 })
-                .catch(error => console.error('Error fetching data:', error));
+                .catch(error => console.error('Error fetching chart data:', error));
         }
 
-        // Update every 2 seconds
-        setInterval(updateCharts, 2000);
+        // Update every 500ms for more responsive live price updates
+        setInterval(updateCharts, 500);
         updateCharts(); // Initial load
+        
+        console.log('Chart initialized with live price updates every 500ms');
     </script>
 </body>
 </html>'''

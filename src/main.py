@@ -98,7 +98,7 @@ def build():
     # Initialize the chart server
     chart_server = LiveChartServer(max_candles=100, port=8080)
 
-    # Handler for new quotes: save to DB, send to CandleMaker, and to strategy for exit logic
+    # Handler for new quotes: save to DB, send to CandleMaker, to strategy for exit logic, and to chart for live price
     def handle_quote(quote):
         logger.debug(f"handle_quote received: {quote}")
         quote_db.save_quote(quote)  # Save the full quote to the database
@@ -108,15 +108,19 @@ def build():
         volume = quote.get('volume', 0)
         order_mgr.update_ltp(name, ltp, timestamp) 
         
-
+        # Add real-time price update to chart server
+        chart_server.add_quote(quote)
 
     # Handler for new candles: let strategy decide and create orders
     def handle_candle(name, candle):
+        logger.info(f"Processing new candle for {name}: OHLC({candle['open']:.2f},{candle['high']:.2f},{candle['low']:.2f},{candle['close']:.2f}) VWAP({candle.get('vwap', 'N/A')}) Volume({candle.get('volume', 0)}) at {candle['timestamp']}")
+        
         entry_strategy.on_candle(name, candle)
         order_mgr.update_candle(name, candle)  # Update order manager with new candle data
         
-        # Add candle to chart server
+        # Add candle to chart server with logging
         chart_server.add_candle(name, candle)
+        logger.debug(f"Candle data sent to chart server for {name}")
         
         ## TODO: add candles to data visualisation classes
         

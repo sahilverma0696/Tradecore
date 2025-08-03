@@ -6,6 +6,7 @@ import json
 import websocket
 import ssl
 import traceback
+from datetime import datetime
 
 from src.logger_factory import get_logger
 
@@ -32,8 +33,12 @@ class BinanceStreamer:
                 data = data['data']
             # For ticker, use 'data' or direct fields
             if 'e' in data and data['e'] == '24hrTicker':
+                # Convert Binance timestamp (milliseconds) to datetime
+                timestamp_ms = data.get('E')
+                timestamp = datetime.fromtimestamp(timestamp_ms / 1000) if timestamp_ms else datetime.now()
+                
                 compat_quote = {
-                    'ts': data.get('E'),
+                    'ts': timestamp,
                     'inst': data.get('s'),
                     'name': self.name_symbol,
                     'ltp': float(data.get('c', 0)),

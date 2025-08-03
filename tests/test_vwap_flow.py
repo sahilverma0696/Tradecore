@@ -26,6 +26,7 @@ class TestVWAPFlow(unittest.TestCase):
             "low": 99,
             "close": 106,
             "volume": 1000,
+            "vwap": 102.5,  # Add VWAP to test data
             "name": self.symbol,
         }
 
