@@ -2,143 +2,170 @@
 
 ## Project Overview
 
-This is an algorithmic trading system implementing a VWAP (Volume Weighted Average Price) strategy for Indian markets (NSE F&O), using Zerodha Kite APIs for live data and order execution. The system is modular, event-driven, and designed for both live and paper trading.
+This is an algorithmic trading system implementing a VWAP (Volume Weighted Average Price) strategy for Indian markets (NSE F&O), using Zerodha Kite APIs for live data and order execution. The system is modular, event-driven, and designed for both live and paper trading. It now includes a real-time CLI dashboard for monitoring trades.
 
 ---
 
 ## Directory Structure
 
 - `src/`
-  - `main.py` — Entry point, wires together all components.
+  - `main.py` — Entry point, wires together all components using EventBus.
   - `logger_factory.py` — Logger utility.
   - `config_manager.py` — Loads and hot-reloads JSON config.
   - `core/`
+    - `event_bus/` — Event-driven communication system with pub-sub pattern.
     - `order_object.py` — Order object, encapsulates order state.
-    - `order_manager.py` — Manages active orders, delegates logging.
+    - `order_manager.py` — Manages active orders, subscribes to entry/exit signals.
     - `order_logger.py` — CSV logger for order entries/exits.
     - `candle_maker.py` — Aggregates tick data into 5-min candles, computes VWAP.
     - `executioner.py` — Places orders via KiteConnect or simulates (paper trade).
+  - `cli/`
+    - `dashboard.py` — Real-time CLI dashboard with curses or simple text interface.
+    - `cli_main.py` — CLI entry point with argument parsing.
+    - `demo_data.py` — Demo data generator for testing dashboard.
   - `market/`
-    - `zerodha_streamer.py` — Handles live tick streaming from KiteTicker.
+    - `zerodha_streamer.py` — Handles live tick streaming, publishes QuoteReceived events.
     - `quote_database.py` — Persists tick data to SQLite, provides historical access.
   - `strategies/`
-    - `vwap_strategy.py` — Main trading logic: entry/exit, position/risk management.
+    - `vwap_strategy.py` — Main trading logic, publishes EntrySignal/ExitSignal events.
 
 - `trading_config.json` — Main config file: symbols, credentials, instrument settings, execution params.
 - `logs/` — Log files and CSVs for orders/candles.
 - `requirements.txt` — Python dependencies.
-- `tests/` — Unit tests for all major modules.
+- `tests/` — Unit tests for all major modules including event bus.
 
 ---
 
-## Main Components and Data Flow
+## Event-Driven Architecture
 
-1. **Config Loading**:  
-   `ConfigManager` loads `trading_config.json` and hot-reloads on changes.
+The system now uses a centralized EventBus for decoupled communication:
 
-2. **Streaming**:  
-   `ZerodhaStreamer` connects to KiteTicker, streams live ticks, and calls registered handlers.
+### Key Events:
+- `QuoteReceived` — Market data from streamers
+- `CandleGenerated` — 5-minute candles with VWAP
+- `EntrySignal` — Strategy entry decisions
+- `ExitSignal` — Exit conditions met
+- `OrderExecuted` — Successful order placement
 
-3. **Candle Aggregation**:  
-   `CandleMaker` receives ticks, aggregates into 5-min candles, computes VWAP, and notifies handlers.
+### Data Flow:
+1. **Streamers** (Zerodha/Binance) publish `QuoteReceived` events
+2. **CandleMaker** subscribes to quotes, publishes `CandleGenerated` events
+3. **VwapStrategy** subscribes to candles, publishes `EntrySignal`/`ExitSignal` events
+4. **OrderManager** subscribes to signals, manages orders, calls executioner
+5. **CLI Dashboard** subscribes to all events for real-time monitoring
 
-4. **Strategy**:  
-   `VwapStrategy` receives candles and tick data, manages all entry/exit logic, and tracks positions.
+---
 
-5. **Order Management**:  
-   `OrderManager` creates and tracks `OrderObject` instances for each symbol, logs entries/exits.
+## CLI Dashboard
 
-6. **Execution**:  
-   `Execute` (in `src/core/executioner.py`) places all orders (entries and exits) via KiteConnect or simulates them (paper trade).  
-   All order placement is routed through this class.
+### Features:
+- **Real-time monitoring** of active positions with live P&L
+- **Recent quotes** with price changes and volume
+- **Signal history** showing entry/exit decisions
+- **System statistics** (uptime, event counts, total P&L)
+- **Color coding** for profits/losses
+- **Two interfaces**: Curses (full-featured) or simple text
 
-7. **Quote Database**:  
-   `QuoteDatabase` persists all tick data to SQLite for later analysis/backtesting.
+### Usage:
+```bash
+# Main trading system
+python3 -m src.main
+
+# CLI Dashboard (separate terminal)
+python3 -m src.cli.cli_main
+
+# Demo mode (generates fake data)
+python3 -m src.cli.cli_main --standalone
+
+# Simple text interface
+python3 -m src.cli.cli_main --no-curses
+```
 
 ---
 
 ## Key Design Patterns
 
-- **Event-driven**:  
-  Components register handlers (callbacks) for new data/events.
-
-- **Strategy-centric**:  
-  All trading logic (entry/exit) is in `vwap_strategy.py`.  
-  `signal_manager.py` and `exit_manager.py` are deprecated.
-
-- **Order Abstraction**:  
-  `OrderObject` encapsulates all state for a trade, including step/trail logic.
-
-- **Persistence**:  
-  Orders and candles are logged to CSV. Ticks are stored in SQLite.
+- **Event-driven Architecture**: EventBus singleton with pub-sub pattern for decoupled communication
+- **Strategy-centric**: All trading logic in `vwap_strategy.py`
+- **Order Abstraction**: `OrderObject` encapsulates all state for a trade
+- **Real-time Monitoring**: CLI dashboard provides live trade monitoring
+- **Persistence**: Orders/candles logged to CSV, ticks stored in SQLite
 
 ---
 
 ## Configuration
 
 - `trading_config.json` contains:
-  - `symbols`: List of instrument tokens.
-  - `name_symbol`: Mapping for display.
-  - `api_key`, `api_secret`, `access_token`: Kite credentials.
-  - `paper_trade`: Bool, if true, no live orders.
-  - `instrument_config`: Per-symbol step/trail settings.
-  - `execution`: Per-symbol order quantities, deltas, retry settings.
+  - `symbols`: List of instrument tokens
+  - `name_symbol`: Mapping for display
+  - `api_key`, `api_secret`, `access_token`: Kite credentials
+  - `paper_trade`: Bool, if true, no live orders
+  - `instrument_config`: Per-symbol step/trail settings
+  - `execution`: Per-symbol order quantities, deltas, retry settings
 
 ---
 
-## Main Entry Point
+## Testing
 
-To run the trading system from the `vwap` directory:
+### Run Tests:
 ```bash
-python3 -m src.main
-```
-
----
-
-## Running Tests
-
-To run all tests:
-```bash
+# All tests
 python3 -m unittest discover -s tests
+
+# Specific test files
+python3 -m unittest tests/test_vwap_flow.py
+python3 -m unittest tests/test_event_bus.py
 ```
 
-Or run a specific test file, for example:
-```bash
-python3 -m unittest tests/test_vwap_flow.py
-```
+### Test Coverage:
+- Event bus functionality and thread safety
+- VWAP strategy entry/exit logic
+- Order management and execution
+- Mock client integration
+- Dashboard event handling
+
+---
+
+## CLI Dashboard Implementation
+
+### Components:
+- **TradingDashboard**: Main dashboard class, subscribes to all trading events
+- **Event Handlers**: Process quotes, candles, signals, and orders in real-time
+- **Display Logic**: Curses-based interface with color coding and auto-refresh
+- **Demo Data**: Generates realistic trading data for testing
+
+### Real-time Features:
+- Live P&L calculation as prices change
+- Position tracking with entry/exit times
+- Signal history with timestamps
+- System performance metrics
+- Auto-refresh every 1-2 seconds
 
 ---
 
 ## Extending/Modifying
 
-- **To change trading logic**:  
-  Edit `src/strategies/vwap_strategy.py`.
-
-- **To add new data sources**:  
-  Implement a new streamer in `src/market/`.
-
-- **To change order handling**:  
-  Edit `src/core/order_manager.py` and `src/core/order_object.py`.
-
----
-
-## Deprecated
-
-- `src/core/signal_manager.py` and `src/core/exit_manager.py` are not used; all logic is in `vwap_strategy.py` and order placement is routed through `Execute`.
+- **To change trading logic**: Edit `src/strategies/vwap_strategy.py`
+- **To add new events**: Add to `src/core/event_bus/events.py`
+- **To customize dashboard**: Modify `src/cli/dashboard.py`
+- **To add new data sources**: Implement new streamer in `src/market/`
 
 ---
 
 ## Requirements
 
 - Python 3.10+
-- See `requirements.txt` for dependencies.
+- Dependencies in `requirements.txt`
+- Optional: `windows-curses` for Windows users
+- Terminal with color support for best dashboard experience
 
 ---
 
 ## Notes for LLM/AI Assistants
 
-- All trading logic is centralized in `vwap_strategy.py`.
-- Orders are created/managed via `OrderManager` and `OrderObject`.
-- Streaming and candle aggregation are decoupled via handler registration.
-- All stateful objects (orders, trades, quotes) are persisted for reproducibility.
-- System is designed for easy extension and modularity.
+- **Event-driven**: All communication now goes through EventBus instead of direct callbacks
+- **Decoupled**: Components communicate via events, making system more modular
+- **Real-time**: CLI dashboard provides live monitoring without affecting trading logic
+- **Testable**: Event system makes it easy to test components in isolation
+- **Extensible**: Easy to add new event types and subscribers
+- **Thread-safe**: EventBus handles concurrent access from multiple threads
