@@ -125,9 +125,9 @@ class LiveChartServer:
 <html>
 <head>
     <title>VWAP Live Chart</title>
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/chartjs-chart-financial"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-chart-financial@0.2.1"></script>
     <style>
         body { font-family: Arial, sans-serif; margin: 0; padding: 20px; background-color: #f5f5f5; }
         .container { max-width: 1200px; margin: 0 auto; }
@@ -168,7 +168,7 @@ class LiveChartServer:
             </div>
         </div>
         <div class="chart-container">
-            <canvas id="priceChart" width="400" height="200"></canvas>
+            <canvas id="priceChart" width="400" height="300"></canvas>
         </div>
         <div class="chart-container">
             <canvas id="volumeChart" width="400" height="100"></canvas>
@@ -185,10 +185,12 @@ class LiveChartServer:
                 datasets: [{
                     label: 'OHLC',
                     data: [],
-                    borderColor: 'rgb(75, 192, 192)',
-                    backgroundColor: 'rgba(75, 192, 192, 0.2)',
-                    borderWidth: 1,
                     color: {
+                        up: '#26a69a',
+                        down: '#ef5350',
+                        unchanged: '#999999'
+                    },
+                    borderColor: {
                         up: '#26a69a',
                         down: '#ef5350',
                         unchanged: '#999999'
@@ -203,13 +205,16 @@ class LiveChartServer:
                     fill: false,
                     tension: 0.1,
                     pointRadius: 0,
-                    pointHoverRadius: 3
+                    pointHoverRadius: 3,
+                    yAxisID: 'y'
                 }]
             },
             options: {
                 responsive: true,
+                maintainAspectRatio: false,
                 interaction: {
                     intersect: false,
+                    mode: 'index'
                 },
                 scales: {
                     x: {
@@ -217,7 +222,8 @@ class LiveChartServer:
                         time: {
                             unit: 'minute',
                             displayFormats: {
-                                minute: 'HH:mm'
+                                minute: 'HH:mm',
+                                hour: 'HH:mm'
                             }
                         },
                         title: {
@@ -226,7 +232,8 @@ class LiveChartServer:
                         }
                     },
                     y: {
-                        beginAtZero: false,
+                        type: 'linear',
+                        position: 'left',
                         title: {
                             display: true,
                             text: 'Price'
@@ -262,6 +269,7 @@ class LiveChartServer:
             },
             options: {
                 responsive: true,
+                maintainAspectRatio: false,
                 scales: {
                     x: {
                         type: 'time',
@@ -303,16 +311,27 @@ class LiveChartServer:
             fetch('/data')
                 .then(response => response.json())
                 .then(data => {
-                    // Update OHLC data
-                    priceChart.data.datasets[0].data = data.ohlc;
+                    console.log('Chart data received:', data);
                     
-                    // Update VWAP data - now properly formatted as line data
-                    priceChart.data.datasets[1].data = data.vwap;
+                    // Update OHLC data - ensure proper format
+                    if (data.ohlc && data.ohlc.length > 0) {
+                        priceChart.data.datasets[0].data = data.ohlc;
+                        console.log('OHLC data updated:', data.ohlc.length, 'candles');
+                    }
+                    
+                    // Update VWAP data
+                    if (data.vwap && data.vwap.length > 0) {
+                        priceChart.data.datasets[1].data = data.vwap;
+                        console.log('VWAP data updated:', data.vwap.length, 'points');
+                    }
                     
                     // Update volume data
-                    volumeChart.data.labels = data.labels;
-                    volumeChart.data.datasets[0].data = data.volume;
+                    if (data.labels && data.volume) {
+                        volumeChart.data.labels = data.labels;
+                        volumeChart.data.datasets[0].data = data.volume;
+                    }
                     
+                    // Force chart updates with animation disabled for smoother updates
                     priceChart.update('none');
                     volumeChart.update('none');
                     
