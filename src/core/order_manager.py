@@ -14,6 +14,7 @@ class OrderManager:
         self._order_logger = OrderLogger(log_dir)
         self._handlers = []  # callback(name, order, timestamp)
         self._exit_manager = None  # Will be set via register_exit_manager
+        self._web_server = None  # Will be set when web server is initialized
         self._logger.info("OrderManager initialized")
         
     def register_handler(self, cb):
@@ -25,6 +26,11 @@ class OrderManager:
         """Register exit manager for exit analysis"""
         self._exit_manager = exit_manager
         self._logger.info("Exit manager registered with OrderManager")
+
+    def set_web_server(self, web_server):
+        """Set the web server for real-time updates."""
+        self._web_server = web_server
+        self._logger.info("Web server registered with OrderManager")
 
     def get_signal(self, signal: str, instrument: str, **kwargs):
         """
@@ -94,6 +100,10 @@ class OrderManager:
         self._logger.info(f"Created order {name} with side {side} at {timestamp}")
         self._order_logger.log_entry(order)
         
+        # Broadcast order update to web interface
+        if self._web_server:
+            self._web_server.broadcast_order_update(name, order)
+        
         # Execute entry order
         for cb in self._handlers:
             try:
@@ -112,6 +122,11 @@ class OrderManager:
                 f"Retreat: {order.get_retreat():.2f}% | Duration: {(timestamp - order.get_entry_time()).seconds}s"
             )
             self._order_logger.log_exit(order, exit_reason, exit_price)
+            
+            # Broadcast order removal to web interface
+            if self._web_server:
+                # Send a final update before removal
+                self._web_server.broadcast_order_update(name, order)
         return order
 
     def has_order(self, name: str) -> bool:
@@ -125,6 +140,10 @@ class OrderManager:
             order = self._orders[name]
             order.set_ltp(ltp, timestamp)
             
+            # Broadcast LTP update to web interface
+            if self._web_server:
+                self._web_server.broadcast_order_update(name, order)
+            
             # Check for exit signals via exit manager
             if self._exit_manager:
                 try:
@@ -135,6 +154,10 @@ class OrderManager:
     def update_candle(self, name: str, candle: dict, timestamp=None):
         if name in self._orders:
             self._orders[name].set_current_candle(candle, timestamp)
+            
+            # Broadcast candle update to web interface
+            if self._web_server:
+                self._web_server.broadcast_order_update(name, self._orders[name])
 
     # Helper to iterate
     def all_orders(self):

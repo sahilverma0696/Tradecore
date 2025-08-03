@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Order Monitor</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 20px;
+            border-radius: 10px;
+            margin-bottom: 20px;
+            text-align: center;
+        }
+        .stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+        .stat-card {
+            background: white;
+            padding: 15px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            text-align: center;
+        }
+        .stat-value {
+            font-size: 24px;
+            font-weight: bold;
+            color: #333;
+        }
+        .stat-label {
+            color: #666;
+            margin-top: 5px;
+        }
+        .orders-container {
+            background: white;
+            border-radius: 10px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            overflow: hidden;
+        }
+        .orders-header {
+            background: #333;
+            color: white;
+            padding: 15px;
+            display: grid;
+            grid-template-columns: 1fr 1fr 1fr 1fr 1fr 1fr 1fr 1fr 1fr;
+            gap: 10px;
+            font-weight: bold;
+        }
+        .order-row {
+            padding: 15px;
+            display: grid;
+            grid-template-columns: 1fr 1fr 1fr 1fr 1fr 1fr 1fr 1fr 1fr;
+            gap: 10px;
+            border-bottom: 1px solid #eee;
+            transition: background-color 0.3s;
+        }
+        .order-row:hover {
+            background-color: #f8f9fa;
+        }
+        .order-row.updated {
+            background-color: #e8f5e8;
+            animation: flash 1s ease-in-out;
+        }
+        @keyframes flash {
+            0% { background-color: #90EE90; }
+            100% { background-color: #e8f5e8; }
+        }
+        .status {
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 12px;
+            font-weight: bold;
+        }
+        .status.active { background: #d4edda; color: #155724; }
+        .status.filled { background: #d1ecf1; color: #0c5460; }
+        .status.cancelled { background: #f8d7da; color: #721c24; }
+        .side {
+            font-weight: bold;
+        }
+        .side.BUY { color: #28a745; }
+        .side.SELL { color: #dc3545; }
+        .pnl.positive { color: #28a745; font-weight: bold; }
+        .pnl.negative { color: #dc3545; font-weight: bold; }
+        .connection-status {
+            position: fixed;
+            top: 10px;
+            right: 10px;
+            padding: 8px 16px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: bold;
+        }
+        .connected { background: #d4edda; color: #155724; }
+        .disconnected { background: #f8d7da; color: #721c24; }
+        .no-orders {
+            text-align: center;
+            padding: 40px;
+            color: #666;
+            font-style: italic;
+        }
+    </style>
+</head>
+<body>
+    <div class="connection-status" id="connectionStatus">Connecting...</div>
+    
+    <div class="header">
+        <h1>📊 Real-Time Order Monitor</h1>
+        <p>Live tracking of your trading orders</p>
+    </div>
+
+    <div class="stats">
+        <div class="stat-card">
+            <div class="stat-value" id="totalOrders">0</div>
+            <div class="stat-label">Total Orders</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-value" id="activeOrders">0</div>
+            <div class="stat-label">Active Orders</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-value" id="totalPnL">₹0</div>
+            <div class="stat-label">Total P&L</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-value" id="lastUpdate">--:--:--</div>
+            <div class="stat-label">Last Update</div>
+        </div>
+    </div>
+
+    <div class="orders-container">
+        <div class="orders-header">
+            <div>Symbol</div>
+            <div>Side</div>
+            <div>Quantity</div>
+            <div>Filled</div>
+            <div>Price</div>
+            <div>LTP</div>
+            <div>Status</div>
+            <div>P&L</div>
+            <div>Time</div>
+        </div>
+        <div id="ordersBody">
+            <div class="no-orders">No orders to display</div>
+        </div>
+    </div>
+
+    <script>
+        const socket = io();
+        let orders = {};
+
+        socket.on('connect', function() {
+            document.getElementById('connectionStatus').textContent = 'Connected';
+            document.getElementById('connectionStatus').className = 'connection-status connected';
+        });
+
+        socket.on('disconnect', function() {
+            document.getElementById('connectionStatus').textContent = 'Disconnected';
+            document.getElementById('connectionStatus').className = 'connection-status disconnected';
+        });
+
+        socket.on('orders_update', function(data) {
+            orders = data;
+            updateOrdersDisplay();
+            updateStats();
+        });
+
+        socket.on('order_update', function(data) {
+            orders[data.name] = data.data;
+            updateOrdersDisplay();
+            updateStats();
+            
+            // Flash the updated row
+            const row = document.getElementById(`order-${data.name}`);
+            if (row) {
+                row.classList.add('updated');
+                setTimeout(() => row.classList.remove('updated'), 1000);
+            }
+        });
+
+        function updateOrdersDisplay() {
+            const ordersBody = document.getElementById('ordersBody');
+            
+            if (Object.keys(orders).length === 0) {
+                ordersBody.innerHTML = '<div class="no-orders">No orders to display</div>';
+                return;
+            }
+
+            let html = '';
+            Object.entries(orders).forEach(([name, order]) => {
+                const pnlClass = order.pnl > 0 ? 'positive' : order.pnl < 0 ? 'negative' : '';
+                html += `
+                    <div class="order-row" id="order-${name}">
+                        <div>${order.symbol || 'N/A'}</div>
+                        <div class="side ${order.side}">${order.side || 'N/A'}</div>
+                        <div>${order.quantity || 0}</div>
+                        <div>${order.filled_quantity || 0}</div>
+                        <div>₹${(order.price || 0).toFixed(2)}</div>
+                        <div>₹${(order.ltp || 0).toFixed(2)}</div>
+                        <div class="status ${order.status?.toLowerCase()}">${order.status || 'N/A'}</div>
+                        <div class="pnl ${pnlClass}">₹${(order.pnl || 0).toFixed(2)}</div>
+                        <div>${order.timestamp || 'N/A'}</div>
+                    </div>
+                `;
+            });
+            ordersBody.innerHTML = html;
+        }
+
+        function updateStats() {
+            const totalOrders = Object.keys(orders).length;
+            const activeOrders = Object.values(orders).filter(o => o.status === 'ACTIVE' || o.status === 'OPEN').length;
+            const totalPnL = Object.values(orders).reduce((sum, o) => sum + (o.pnl || 0), 0);
+            const now = new Date();
+            
+            document.getElementById('totalOrders').textContent = totalOrders;
+            document.getElementById('activeOrders').textContent = activeOrders;
+            document.getElementById('totalPnL').textContent = `₹${totalPnL.toFixed(2)}`;
+            document.getElementById('totalPnL').className = `stat-value ${totalPnL >= 0 ? 'pnl positive' : 'pnl negative'}`;
+            document.getElementById('lastUpdate').textContent = now.toLocaleTimeString();
+        }
+
+        // Auto-refresh every 30 seconds as fallback
+        setInterval(() => {
+            fetch('/api/orders')
+                .then(response => response.json())
+                .then(data => {
+                    orders = data;
+                    updateOrdersDisplay();
+                    updateStats();
+                })
+                .catch(console.error);
+        }, 30000);
+    </script>
+</body>
+</html>

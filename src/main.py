@@ -18,8 +18,10 @@ from src.system_config import get_streamer
 from src.data_store.quote_database_factory import get_quote_database
 from src.core.plotting.live_chart_server import LiveChartServer
 from src.core.plotting.candle_plotter import CandlePlotter
+from src.web_server import OrderWebServer
 import os
 import traceback
+import threading
 
 logger = get_logger("MAIN")
 
@@ -62,6 +64,14 @@ def build():
     order_mgr = OrderManager()
     logger.info("OrderManager initialized.")
     
+    # Initialize web server for order monitoring
+    logger.info("Initializing web server for order monitoring...")
+    web_server = OrderWebServer(order_mgr, port=8081)
+    
+    # Start web server in a separate thread
+    web_thread = threading.Thread(target=web_server.run, daemon=True, kwargs={'debug': False})
+    web_thread.start()
+    logger.info("Web server started on http://localhost:8081", to_console=True)
     
     # Initialize strategy with configuration
     logger.info("Initializing VWAP strategy...")
@@ -180,6 +190,9 @@ def build():
         # Optionally stop DB thread
         if hasattr(quote_db, 'stop'):
             quote_db.stop()
+        
+        # Stop web server when shutting down
+        web_server.stop()
 
 
 if __name__ == "__main__":
