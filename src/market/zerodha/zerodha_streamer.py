@@ -69,17 +69,35 @@ class ZerodhaStreamer:
             except Exception as e:
                 self._logger.error(f"Failed to save quote to database: {e}")
 
-            # Optionally, call handlers with a compatibility quote if needed
+            # Create compatibility quote with proper timestamp handling
             ts = t.get('timestamp') or t.get('exchange_timestamp') or datetime.now()
+            
+            # Ensure timestamp is a datetime object
+            if not isinstance(ts, datetime):
+                if isinstance(ts, str):
+                    try:
+                        ts = datetime.fromisoformat(ts.replace('Z', '+00:00'))
+                    except:
+                        ts = datetime.now()
+                elif hasattr(ts, 'timestamp'):
+                    ts = datetime.fromtimestamp(ts.timestamp())
+                else:
+                    ts = datetime.now()
+            
             compat_quote = {
                 'ts': ts,
+                'timestamp': ts,  # Add both for compatibility
                 'inst': tok,
                 'name': self.name_symbol,
-                'ltp': t.get('last_price'),
+                'ltp': t.get('last_price', 0),
                 'last_quantity': t.get('last_quantity', 0),
                 'volume': t.get('volume', 0),
-                'change': t.get('change')
+                'change': t.get('change', 0),
+                'oi': t.get('oi', 0),  # Open interest
+                'ohlc': t.get('ohlc', {}),  # OHLC data
+                'depth': t.get('depth', {})  # Market depth
             }
+            
             for cb in self._handlers:
                 try:
                     cb(compat_quote)

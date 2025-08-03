@@ -27,6 +27,11 @@ class OrderManager:
         self._exit_manager = exit_manager
         self._logger.info("Exit manager registered with OrderManager")
 
+    def register_web_server(self, web_server):
+        """Register web server for real-time order updates."""
+        self._web_server = web_server
+        self._logger.info("Web server registered for real-time order updates")
+
     def set_web_server(self, web_server):
         """Set the web server for real-time updates."""
         self._web_server = web_server
@@ -136,13 +141,17 @@ class OrderManager:
         return self._orders.get(name)
 
     def update_ltp(self, name: str, ltp: float, timestamp=None):
+        """Update LTP for an order and broadcast to web interface."""
         if name in self._orders:
             order = self._orders[name]
             order.set_ltp(ltp, timestamp)
             
-            # Broadcast LTP update to web interface
+            # Broadcast update to web interface
             if self._web_server:
-                self._web_server.broadcast_order_update(name, order)
+                try:
+                    self._web_server.broadcast_order_update(name, order)
+                except Exception as e:
+                    self._logger.error(f"Error broadcasting order update to web: {e}")
             
             # Check for exit signals via exit manager
             if self._exit_manager:

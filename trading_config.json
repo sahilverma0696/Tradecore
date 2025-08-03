@@ -29,8 +29,8 @@
     "market": "zerodha"
   },
   "binance": {
-    "symbols": ["btcusdt"],
-    "name_symbol": "BTCUSDT",
+    "symbols": ["enausdt"],
+    "name_symbol": "ENAUSDT",
     "paper_trade": true,
     "execution": {
       "delta_sell": 0.002,
@@ -55,5 +55,5 @@
     "sell_quantity": 0.01,
     "market": "binance"
   },
-  "market": "binance"
+  "market": "zerodha"
 }

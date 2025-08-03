@@ -55,22 +55,62 @@ class OrderWebServer:
     def _serialize_order(self, order):
         """Convert order object to dictionary for JSON serialization."""
         try:
+            # Handle datetime objects for timestamp
+            timestamp = getattr(order, 'timestamp', datetime.now())
+            if hasattr(timestamp, 'strftime'):
+                timestamp_str = timestamp.strftime('%H:%M:%S')
+            else:
+                timestamp_str = str(timestamp)
+            
+            # Handle different order object types (Zerodha vs others)
+            symbol = getattr(order, 'symbol', getattr(order, 'tradingsymbol', 'N/A'))
+            side = getattr(order, 'side', getattr(order, 'transaction_type', 'N/A'))
+            
+            # Calculate PnL if available
+            pnl = getattr(order, 'pnl', 0)
+            if pnl == 0:
+                # Try to calculate PnL from entry_price and ltp
+                entry_price = getattr(order, 'entry_price', getattr(order, 'average_price', 0))
+                ltp = getattr(order, 'ltp', 0)
+                quantity = getattr(order, 'filled_quantity', getattr(order, 'quantity', 0))
+                if entry_price and ltp and quantity:
+                    if side.upper() in ['BUY', 'LONG']:
+                        pnl = (ltp - entry_price) * quantity
+                    elif side.upper() in ['SELL', 'SHORT']:
+                        pnl = (entry_price - ltp) * quantity
+            
             return {
-                'symbol': getattr(order, 'symbol', 'N/A'),
-                'side': getattr(order, 'side', 'N/A'),
+                'symbol': symbol,
+                'side': side,
                 'quantity': getattr(order, 'quantity', 0),
-                'filled_quantity': getattr(order, 'filled_quantity', 0),
-                'price': getattr(order, 'price', 0),
+                'filled_quantity': getattr(order, 'filled_quantity', getattr(order, 'quantity', 0)),
+                'price': getattr(order, 'price', getattr(order, 'average_price', 0)),
                 'ltp': getattr(order, 'ltp', 0),
-                'status': getattr(order, 'status', 'N/A'),
-                'pnl': getattr(order, 'pnl', 0),
-                'timestamp': getattr(order, 'timestamp', datetime.now()).strftime('%H:%M:%S') if hasattr(order, 'timestamp') else 'N/A',
-                'order_type': getattr(order, 'order_type', 'N/A'),
-                'entry_price': getattr(order, 'entry_price', 0),
-                'exit_price': getattr(order, 'exit_price', 0)
+                'status': getattr(order, 'status', getattr(order, 'order_status', 'N/A')),
+                'pnl': round(pnl, 2),
+                'timestamp': timestamp_str,
+                'order_type': getattr(order, 'order_type', getattr(order, 'product', 'N/A')),
+                'entry_price': getattr(order, 'entry_price', getattr(order, 'average_price', 0)),
+                'exit_price': getattr(order, 'exit_price', 0),
+                'order_id': getattr(order, 'order_id', getattr(order, 'order_id', 'N/A'))
             }
         except Exception as e:
-            return {'error': str(e)}
+            self._logger.error(f"Error serializing order: {e}")
+            return {
+                'error': str(e),
+                'symbol': 'Error',
+                'side': 'N/A',
+                'quantity': 0,
+                'filled_quantity': 0,
+                'price': 0,
+                'ltp': 0,
+                'status': 'ERROR',
+                'pnl': 0,
+                'timestamp': datetime.now().strftime('%H:%M:%S'),
+                'order_type': 'N/A',
+                'entry_price': 0,
+                'exit_price': 0
+            }
     
     def broadcast_order_update(self, order_name, order):
         """Broadcast order update to all connected clients."""

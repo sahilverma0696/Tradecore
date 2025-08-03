@@ -19,7 +19,6 @@ from src.data_store.quote_database_factory import get_quote_database
 from src.core.plotting.live_chart_server import LiveChartServer
 from src.core.plotting.candle_plotter import CandlePlotter
 from src.web_server import OrderWebServer
-import os
 import traceback
 import threading
 
@@ -39,7 +38,6 @@ def build():
         logger.error("Configuration is empty or invalid. Exiting.", to_console=True)
         return
 
-    # --- streamer first ---
     logger.info("Initializing streamer...", to_console=True)
     if not cfg.get('symbols'):
         logger.error("No symbols configured for streamer. Exiting.", to_console=True)
@@ -48,6 +46,7 @@ def build():
     logger.info(f"Selected market: {market}", to_console=True)
     streamer = get_streamer(cfg)
     logger.info(f"{market.capitalize()} streamer initialized.", to_console=True)
+
 
     # Initialize core components
     logger.info("Initializing core components...")
@@ -67,6 +66,9 @@ def build():
     # Initialize web server for order monitoring
     logger.info("Initializing web server for order monitoring...")
     web_server = OrderWebServer(order_mgr, port=8081)
+    
+    # Connect order manager to web server for real-time updates
+    order_mgr.register_web_server(web_server)
     
     # Start web server in a separate thread
     web_thread = threading.Thread(target=web_server.run, daemon=True, kwargs={'debug': False})

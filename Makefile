@@ -3,7 +3,7 @@
 # To run with Binance as the market:
 # make run MARKET=binance
 run:
-	MARKET=$(MARKET) python3 -m src.main
+	python3 -m src.main
 
 test:
 	python3 -m unittest discover -s tests
