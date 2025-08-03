@@ -6,9 +6,8 @@ from src.logger_factory import get_logger
 import os
 import traceback
 
-import matplotlib.pyplot as plt
 import pandas as pd
-from src.core.plotting.candle_plotter import CandlePlotter
+from src.core.plotting.live_chart_server import LiveChartServer
 
 DATA_CANDLE_DIR = "data/candles"
 DATA_GRAPH_DIR = "data/graphs"
@@ -117,8 +116,9 @@ class CandleMaker:
 
     # ------------------------------------------------------------------
     def register_plotting_handler(self):
-        self._plotter = CandlePlotter()
+        self._chart_server = LiveChartServer()
         def plotting_handler(name, candle):
-            self._plotter.add_candle(name, candle)
-            self._plotter.plot()
+            self._chart_server.add_candle(name, candle)
+        self.register_handler(plotting_handler)
+        self._chart_server.start_server()
         self.register_handler(plotting_handler)

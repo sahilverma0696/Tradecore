@@ -16,7 +16,7 @@ from src.strategies.vwap_strategy import VwapStrategy
 from src.strategies.exit_manager import ExitManager
 from src.system_config import get_streamer
 from src.data_store.quote_database_factory import get_quote_database
-from src.core.plotting.candle_plotter import CandlePlotter
+from src.core.plotting.live_chart_server import LiveChartServer
 import os
 import traceback
 
@@ -95,8 +95,8 @@ def build():
     quote_db = get_quote_database(cfg)
     logger.info("QuoteDatabase initialized.")
 
-    # Initialize the plotter
-    plotter = CandlePlotter(max_candles=100)
+    # Initialize the chart server
+    chart_server = LiveChartServer(max_candles=100, port=8080)
 
     # Handler for new quotes: save to DB, send to CandleMaker, and to strategy for exit logic
     def handle_quote(quote):
@@ -115,8 +115,8 @@ def build():
         entry_strategy.on_candle(name, candle)
         order_mgr.update_candle(name, candle)  # Update order manager with new candle data
         
-        # Add candle to plotter
-        plotter.add_candle(name, candle)
+        # Add candle to chart server
+        chart_server.add_candle(name, candle)
         
         ## TODO: add candles to data visualisation classes
         
@@ -145,11 +145,8 @@ def build():
     streamer.start()
     logger.info("System initialised – streaming started")
 
-    # For static plot (after collecting candles)
-    # plotter.plot()
-
-    # For live plot (if you want real-time updates)
-    plotter.start_live_plot()
+    # Start the chart server
+    chart_server.start_server(open_browser=True)
 
     # Wait for Binance streamer thread to finish if market is binance
     if market == 'binance':

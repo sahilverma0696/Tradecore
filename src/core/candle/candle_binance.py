@@ -5,7 +5,7 @@ from collections import defaultdict
 from src.logger_factory import get_logger
 import os
 import traceback
-from src.core.plotting.candle_plotter import CandlePlotter
+from src.core.plotting.live_chart_server import LiveChartServer
 
 DATA_CANDLE_DIR = "data/candles"
 os.makedirs(DATA_CANDLE_DIR, exist_ok=True)
@@ -33,11 +33,11 @@ class CandleBinance:
             self._handlers.append(cb)
 
     def register_plotting_handler(self):
-        self._plotter = CandlePlotter()
+        self._chart_server = LiveChartServer()
         def plotting_handler(name, candle):
-            self._plotter.add_candle(name, candle)
-            self._plotter.plot()
+            self._chart_server.add_candle(name, candle)
         self.register_handler(plotting_handler)
+        self._chart_server.start_server()
 
     def handle_quote_to_candle(self, quote: dict):
         # self._logger.debug(f"Handling Binance quote: {quote}")
