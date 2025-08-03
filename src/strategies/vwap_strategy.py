@@ -6,40 +6,17 @@ from typing import Dict, List, Tuple, Optional
 from src.logger_factory import get_logger
 
 
-# class IncrementalVWAP:
-#     def __init__(self):
-#         self.cum_pv = 0.0  # Cumulative price * volume
-#         self.cum_vol = 0.0
-#         self.vwap = None
-
-#     def update(self, high: float, low: float, close: float, volume: float) -> float:
-#         # VWAP = sum(close * volume) / sum(volume)
-#         self.cum_pv += close * volume
-#         self.cum_vol += volume
-
-#         if self.cum_vol > 0:
-#             self.vwap = round(self.cum_pv / self.cum_vol, 2)
-#         return self.vwap
-
-#     def update_from_quote(self, ltp: float, volume: float) -> float:
-#         # For tick data, use ltp * volume
-#         self.cum_pv += ltp * volume
-#         self.cum_vol += volume
-
-#         if self.cum_vol > 0:
-#             self.vwap = round(self.cum_pv / self.cum_vol, 2)
-#         return self.vwap
-
 class VwapStrategy:
-    """VWAP cross strategy. This class generates only entry signals."""
+    """VWAP cross strategy with integrated exit management."""
 
     def __init__(self, config: dict = None):
         self._logger = get_logger("VWAPStrategy")
         config = config or {}
         self.default_quantity = config.get('default_quantity', 75)
+        self.exit_steps = config.get('exit_steps', [])
         self.positions: Dict[str, dict] = {}
         self._handlers = []  # Entry signal handlers
-        self._logger.info("VWAPStrategy (Entry-only) initialized.")
+        self._logger.info("VWAPStrategy initialized.")
 
     def register_handler(self, cb):
         """Register a callback for entry signals."""
@@ -58,28 +35,31 @@ class VwapStrategy:
         if symbol in self.positions:
             return  # Only generate one entry per symbol
 
-        # Entry logic
+        # Entry logic - send signal to OrderManager
         if open_price < vwap and close_price > vwap:
-            self._trigger_entry(symbol, 'BUY', close_price, candle, vwap)
+            self._trigger_entry_signal(symbol, 'BUY', close_price, candle, vwap)
         elif open_price > vwap and close_price < vwap:
-            self._trigger_entry(symbol, 'SELL', close_price, candle, vwap)
+            self._trigger_entry_signal(symbol, 'SELL', close_price, candle, vwap)
 
-    def _trigger_entry(self, symbol, side, price, candle, vwap):
-        entry = {
+    def _trigger_entry_signal(self, symbol, side, price, candle, vwap):
+        entry_signal = {
+            'signal': 'ENTER',
             'symbol': symbol,
             'side': side,
             'entry_price': price,
             'entry_time': candle['timestamp'],
             'name': candle.get('name', symbol),
-            'entry_open': candle['open'],
-            'entry_close': candle['close'],
             'entry_vwap': vwap,
             'quantity': self.default_quantity,
+            'steps': self.exit_steps,
+            'candle': candle
         }
-        self.positions[symbol] = entry
-        self._logger.info(f"[ENTRY] {side} {symbol} @ {price} VWAP={vwap}")
+        self.positions[symbol] = entry_signal
+        self._logger.info(f"[ENTRY SIGNAL] {side} {symbol} @ {price} VWAP={vwap}")
+        
+        # Send signal to OrderManager
         for cb in self._handlers:
-            cb(entry)
+            cb(entry_signal)
 
     def get_active_positions(self) -> Dict[str, dict]:
         return self.positions

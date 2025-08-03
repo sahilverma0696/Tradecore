@@ -47,7 +47,19 @@ class ZerodhaStreamer:
             req = input("Enter request token: ")
             sess = self._kite.generate_session(req, api_secret=self.api_secret)
             self._kite.set_access_token(sess["access_token"])
-        self._exec = Execute(self._kite, paper_trade=self._paper, logger=self._logger)
+        
+        # Create Execute instance with correct parameters
+        self._exec = Execute(
+            client=self._kite, 
+            paper_trade=self._paper, 
+            logger=self._logger
+        )
+        return self._exec
+
+    # ------------------------------------------------------------------
+    def get_execute(self):
+        """Get the Execute instance"""
+        return self._exec
 
     # ------------------------------------------------------------------
     def get_kite(self):

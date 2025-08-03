@@ -5,7 +5,7 @@ from src.logger_factory import get_logger
 from src.config_manager import ConfigManager
 
 class Execute:
-    def __init__(self, excel_logger, expiry, client):
+    def __init__(self, client, paper_trade=True, logger=None, excel_logger=None, expiry=None):
         self.config_manager = ConfigManager()
         self.config_manager.register_watcher(self._config_updated)
         
@@ -20,20 +20,22 @@ class Execute:
         self.max_retries = self.execution_config.get('max_retries', 2)
         self.retry_delay = self.execution_config.get('retry_delay', 1)
         
-        self.logger = get_logger("Execute")  # An instance of Logger to log messages
+        self.logger = logger or get_logger("Execute")  # Use provided logger or create default
         self.excel_logger = excel_logger  # An instance of ExcelTradeLogger for logging trades
         self.expiry = expiry  # Expiry date for options
         self.state = None  # Track current trade direction ('long' or 'short')
         self.open_trades = {}  # Dictionary to store open trades with entry prices and timestamps
         self.closed_trades = []  # List to store last closed positions
         self.client = client
+        self.paper_trade = paper_trade  # Paper trading mode
 
         print(f"\nInitializing Execute with configuration:")
+        print(f"Paper Trade: {self.paper_trade}")
         print(f"Delta SELL: {self.delta_sell}")
         print(f"Delta BUY: {self.delta_buy}")
         
         if self.logger:
-            self.logger.debug(f"INIT Execute - Delta SELL: {self.delta_sell}, Delta BUY: {self.delta_buy}, Max Retries: {self.max_retries}, Retry Delay: {self.retry_delay}")
+            self.logger.debug(f"INIT Execute - Paper Trade: {self.paper_trade}, Delta SELL: {self.delta_sell}, Delta BUY: {self.delta_buy}, Max Retries: {self.max_retries}, Retry Delay: {self.retry_delay}")
     
     def _config_updated(self, new_config):
         """Handle config updates"""
@@ -76,6 +78,14 @@ class Execute:
         quantity = self.get_quantity(symbol)
         self.logger.debug(f"Attempting to place order: {symbol} {action} quantity: {quantity}")
         
+        # Paper trading mode - simulate order placement
+        if self.paper_trade:
+            self.logger.debug(f"PAPER TRADE: Simulating order placement for {symbol} {action} with quantity {quantity}")
+            if self.excel_logger:
+                self.excel_logger.log_trade(symbol, action, None, timestamp)
+            return True
+        
+        # Real trading mode
         for attempt in range(self.max_retries):
             try:
                 # Place a market order with the Zerodha Kite SDK
@@ -90,7 +100,8 @@ class Execute:
                 )
                 
                 self.logger.debug(f"Order placed successfully for {symbol} {action} with quantity {quantity}")
-                self.excel_logger.log_trade(symbol, action, None, timestamp)
+                if self.excel_logger:
+                    self.excel_logger.log_trade(symbol, action, None, timestamp)
                 return True
                 
             except Exception as e:
