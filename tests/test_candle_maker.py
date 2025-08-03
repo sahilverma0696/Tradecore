@@ -1,12 +1,17 @@
 import unittest
 from datetime import datetime
 from src.core.candle_maker import CandleMaker
+from src.core.event_bus import EventBus, CandleGenerated
 
 class TestCandleMaker(unittest.TestCase):
     def test_handle_quote_and_finalize(self):
         cm = CandleMaker(csv_file=":memory:")
         called = []
-        cm.register_handler(lambda name, candle: called.append((name, candle)))
+        
+        # Subscribe to candle events
+        event_bus = EventBus()
+        event_bus.subscribe(CandleGenerated, lambda event: called.append((event.symbol, event.candle_data)))
+        
         quote = {
             "ts": datetime(2023, 1, 1, 9, 15),
             "inst": 1,

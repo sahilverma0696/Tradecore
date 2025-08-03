@@ -8,8 +8,9 @@ from kiteconnect import KiteConnect, KiteTicker
 
 from src.logger_factory import get_logger
 from src.core.executioner import Execute
+from src.core.event_bus import Publisher, QuoteReceived
 
-class ZerodhaStreamer:
+class ZerodhaStreamer(Publisher):
     def __init__(
         self,
         symbols: List[int],
@@ -19,6 +20,7 @@ class ZerodhaStreamer:
         name_symbol: str,
         paper_trade: bool = True,
     ):
+        super().__init__()
         self.symbols = symbols
         self.api_key = api_key
         self.api_secret = api_secret
@@ -26,16 +28,9 @@ class ZerodhaStreamer:
         self._logger = get_logger("ZerodhaStreamer")
         self._kite: KiteConnect | None = None
         self._ticker: KiteTicker | None = None
-        self._handlers: List[Callable[[dict], None]] = []
         self._paper = paper_trade
         self._exec: Execute | None = None
         self._last_second: dict[int, str] = {}
-
-    # ------------------------------------------------------------------
-    def register_handler(self, cb):
-        if callable(cb):
-            self._logger.debug(f"Registering handler {cb.__name__}")
-            self._handlers.append(cb)
 
     # ------------------------------------------------------------------
     def init_kite(self, access_token: str = None):
@@ -80,22 +75,20 @@ class ZerodhaStreamer:
             except Exception as e:
                 self._logger.error(f"Failed to save quote to database: {e}")
 
-            # Optionally, call handlers with a compatibility quote if needed
+            # Publish quote event
             ts = t.get('timestamp') or t.get('exchange_timestamp') or datetime.now()
-            compat_quote = {
-                'ts': ts,
-                'inst': tok,
-                'name': self.name_symbol,
-                'ltp': t.get('last_price'),
-                'last_quantity': t.get('last_quantity', 0),
-                'volume': t.get('volume', 0),
-                'change': t.get('change')
-            }
-            for cb in self._handlers:
-                try:
-                    cb(compat_quote)
-                except Exception as e:
-                    self._logger.error(f"handler error: {e}")
+            quote_event = QuoteReceived(
+                timestamp=ts,
+                source=self.__class__.__name__,
+                symbol=self.name_symbol,
+                instrument=tok,
+                ltp=t.get('last_price', 0),
+                volume=t.get('volume', 0),
+                last_quantity=t.get('last_quantity', 0),
+                change=t.get('change', 0),
+                raw_data=t
+            )
+            self.publish_event(quote_event)
 
     def _on_connect(self, ws, response):
         self._logger.info("Ticker connected. Subscribing to symbols ...")
@@ -108,6 +101,13 @@ class ZerodhaStreamer:
 
     def start(self):
         if not self._kite:
+            raise RuntimeError("call init_kite() first")
+        self._ticker = KiteTicker(self.api_key, self._kite.access_token)
+        self._ticker.on_ticks = self._on_ticks
+        self._ticker.on_connect = self._on_connect
+        self._ticker.on_close = self._on_close
+        self._logger.info("Starting ticker thread ...")
+        threading.Thread(target=self._ticker.connect, daemon=True).start()
             raise RuntimeError("call init_kite() first")
         self._ticker = KiteTicker(self.api_key, self._kite.access_token)
         self._ticker.on_ticks = self._on_ticks

@@ -9,12 +9,13 @@ from src.strategies.vwap_strategy import VwapStrategy
 from src.strategies.exit_manager import ExitManager
 from src.market.zerodha.zerodha_streamer import ZerodhaStreamer
 from src.market.zerodha.quote_database import QuoteDatabase
+from src.core.event_bus import EventBus, QuoteReceived, EntrySignal, ExitSignal
 
 logger = get_logger("MAIN")
 
 
 def build():
-    logger.info("Starting VWAP trading system...")
+    logger.info("Starting VWAP trading system with event bus...")
     
     # Load configuration
     logger.info("Loading configuration...")
@@ -24,6 +25,10 @@ def build():
     if not cfg:
         logger.error("Configuration is empty or invalid. Exiting.")
         return
+    
+    # Initialize event bus
+    event_bus = EventBus()
+    logger.info("EventBus initialized")
     
     # Initialize core components
     logger.info("Initializing core components...")
@@ -35,7 +40,7 @@ def build():
     
     # Initialize strategy with configuration
     logger.info("Initializing VWAP strategy...")
-    entry_strategy = VwapStrategy(config=cfg)  # Pass config
+    entry_strategy = VwapStrategy(config=cfg)
     logger.info("VWAPStrategy initialized.")
     
     # Initialize exit manager
@@ -53,8 +58,6 @@ def build():
 
     # Initialize streamer
     logger.info("Initializing ZerodhaStreamer...")
-    # Initialize ZerodhaStreamer with configuration
-    logger.info(f"Connecting to Zerodha with symbols: {cfg['symbols']}")
     if not cfg.get('symbols'):
         logger.error("No symbols configured for ZerodhaStreamer. Exiting.")
         return
@@ -77,42 +80,63 @@ def build():
     quote_db = QuoteDatabase(symbol=cfg.get('name_symbol'))
     logger.info("QuoteDatabase initialized.")
 
-    # Handler for new quotes: save to DB and update order manager
-    def handle_quote(quote):
-        quote_db.save_quote(quote)
-        name = quote['name']
-        ltp = quote['ltp']
-        timestamp = quote.get('timestamp', datetime.now())
+    # Subscribe to events
+    def handle_quote_for_db(event: QuoteReceived):
+        """Save quotes to database"""
+        quote_dict = {
+            'ts': event.timestamp,
+            'name': event.symbol,
+            'ltp': event.ltp,
+            'timestamp': event.timestamp
+        }
+        quote_db.save_quote(quote_dict)
         
         # Update order manager with LTP for exit checking
-        order_mgr.update_ltp(name, ltp, timestamp)
+        order_mgr.update_ltp(event.symbol, event.ltp, event.timestamp)
 
-    # Handler for new candles: let strategy decide on entries
-    def handle_candle(name, candle):
-        entry_strategy.on_candle(name, candle)
-        order_mgr.update_candle(name, candle)
+    def handle_entry_signal(event: EntrySignal):
+        """Handle entry signals from strategy"""
+        signal_data = {
+            'signal': 'ENTER',
+            'symbol': event.symbol,
+            'side': event.side,
+            'entry_price': event.entry_price,
+            'entry_time': event.timestamp,
+            'name': event.symbol,
+            'entry_vwap': event.entry_vwap,
+            'quantity': event.quantity,
+            'steps': event.exit_steps,
+            'candle': event.candle_data
+        }
+        order_mgr.handle_signal(signal_data)
 
-    logger.info("Registering handlers...")
-    # Register handlers
-    streamer.register_handler(handle_quote)
-    streamer.register_handler(candle_maker.handle_quote_to_candle)
-    candle_maker.register_handler(handle_candle)
-    
-    # Strategy sends entry signals to order manager
-    entry_strategy.register_handler(order_mgr.handle_signal)
+    def handle_exit_signal(event: ExitSignal):
+        """Handle exit signals"""
+        signal_data = {
+            'signal': 'EXIT',
+            'symbol': event.symbol,
+            'exit_price': event.exit_price,
+            'exit_reason': event.exit_reason,
+            'quantity': event.quantity,
+            'timestamp': event.timestamp
+        }
+        order_mgr.handle_signal(signal_data)
+
+    logger.info("Subscribing to events...")
+    # Subscribe to events
+    event_bus.subscribe(QuoteReceived, handle_quote_for_db)
+    event_bus.subscribe(EntrySignal, handle_entry_signal)
+    event_bus.subscribe(ExitSignal, handle_exit_signal)
     
     # Order manager sends orders to executioner
     order_mgr.register_handler(execer.execute_order)
     
-    logger.info("Handlers registered successfully.")
+    logger.info("Event subscriptions registered successfully.")
     
-    logger.info("Initializing Kite with access token...")
-    streamer.init_kite(cfg.get('access_token'))
-
     logger.info("Starting system...")
     streamer.start()
 
-    logger.info("System initialised – streaming started")
+    logger.info("System initialised – streaming started with event bus")
 
 
 if __name__ == "__main__":
