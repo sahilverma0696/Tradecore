@@ -20,7 +20,63 @@ class ExitManager:
         self._handlers = []
 
         self._logger = get_logger("ExitManager")
-
+    
+    def check_exit(self, order, timestamp: datetime):
+        """Main exit checking method called by OrderManager.
+        
+        Converts OrderObject to position format and checks all exit conditions.
+        """
+        if not order:
+            return
+            
+        symbol = order.get_name()
+        current_price = order.get_ltp()
+        entry_price = order.get_entry_price()
+        side = order.get_side()
+        
+        if not current_price or not entry_price:
+            return
+            
+        # Convert OrderObject to position dictionary format
+        position = {
+            'side': side,
+            'entry_price': entry_price,
+            'quantity': getattr(order, 'quantity', self.default_quantity),
+            'remaining_qty': getattr(order, 'remaining_qty', getattr(order, 'quantity', self.default_quantity)),
+            'max_profit_price': getattr(order, 'max_profit_price', entry_price),
+            'min_profit_price': getattr(order, 'min_profit_price', entry_price),
+            'steps': getattr(order, 'steps', self.exit_steps or []),
+            'filled_steps': getattr(order, 'filled_steps', set()),
+            'position_size': 1.0
+        }
+        
+        # Update price extremes
+        if side == 'BUY':
+            position['max_profit_price'] = max(position['max_profit_price'], current_price)
+        else:
+            position['min_profit_price'] = min(position['min_profit_price'], current_price)
+            
+        # Store updated extremes back to order if possible
+        if hasattr(order, 'max_profit_price'):
+            order.max_profit_price = position['max_profit_price']
+        if hasattr(order, 'min_profit_price'):
+            order.min_profit_price = position['min_profit_price']
+        
+        # Create positions dict for compatibility with existing methods
+        positions = {symbol: position}
+        current_time = timestamp or datetime.now()
+        
+        # Get VWAP from order's current candle if available
+        vwap = current_price  # fallback to current price
+        if hasattr(order, 'get_current_candle'):
+            candle = order.get_current_candle()
+            if candle and 'vwap' in candle:
+                vwap = candle['vwap']
+        
+        # Check all exit conditions
+        self.check_risk_exit(symbol, current_price, vwap, timestamp, positions)
+        if symbol in positions:  # Only continue if position wasn't exited
+            self.manage_position(symbol, current_price, vwap, current_time, timestamp, positions)
 
     def register_handler(self, cb):
         if callable(cb):
@@ -48,7 +104,8 @@ class ExitManager:
         if self._check_trailing_stop(symbol, price, position, timestamp):
             return
 
-        if current_time >= self.market_close:
+        # Only check market close if it's configured
+        if self.market_close and current_time >= self.market_close:
             self._exit_position(symbol, price, timestamp, 'TIME', position, position['remaining_qty'])
 
         if position['remaining_qty'] <= 0:
@@ -121,7 +178,7 @@ class ExitManager:
         pnl = (price - entry_price) * qty if side == 'BUY' else (entry_price - price) * qty
         pnl_pct = (pnl / (entry_price * qty)) * 100 if qty > 0 else 0
 
-        self._logger.info(f"EXIT {side} {symbol} @ {price} | P&L: {pnl:.2f} ({pnl_pct:.2f}%) | Qty: {qty} | Reason: {exit_type}")
+        self._logger.info(f"EXIT {side} {symbol} @ {price} | P&L: {pnl:.2f} ({pnl_pct:.2f}%) | Qty: {qty} | Reason: {exit_type}", to_console=True)
         for cb in self._handlers:
             # Pass all relevant info for order exit
             cb(

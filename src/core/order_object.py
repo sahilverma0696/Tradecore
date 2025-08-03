@@ -38,8 +38,7 @@ class OrderObject:
         if(self.min_price == 0 or self.max_price == 0):
             self.logger.warning(f"Min/Max price initialized to 0 for order {name}, please check the entry price.")
         self.logger.debug(f"OrderObject initialized with entry price: {self.entry_price}, min price: {self.min_price}, max price: {self.max_price}")
-        self.logger.debug(f"OrderObject {name} created with side {self.side}, entry price {self.entry_price}, step {self.step}, trail {self.trail}")
-
+        
         # Performance tracking (NEW)
         self.max_pct = 0.0  # highest favorable movement %
         self.min_pct = 0.0  # worst adverse movement %
@@ -47,7 +46,13 @@ class OrderObject:
         self.current_pct = 0.0  # current PnL %
         self.logger.debug(f"OrderObject {name} initialized with max_pct: {self.max_pct}, min_pct: {self.min_pct}, retreat: {self.retreat}, current_pct: {self.current_pct}")
         
+        # Add status tracking
+        self.status = "ACTIVE"  # ACTIVE, EXITED
+        self.exit_reason = None
+        self.exit_price = None
+        self.exit_time = None
         
+        self.logger.debug(f"OrderObject {name} created with side {self.side}, entry price {self.entry_price}, step {self.step}, trail {self.trail}")
 
     # ----------------- setters -----------------
     def set_ltp(self, ltp, timestamp=None):
@@ -124,8 +129,25 @@ class OrderObject:
     def get_current_pct(self): return self.current_pct
     def get_retreat(self): return self.retreat
 
-    # Add method to update order on exit (optional, for future extension)
+    # Add method to update order on exit
     def exit(self, exit_price, exit_reason, timestamp=None):
+        self.status = "EXITED"
         self.ltp = exit_price
+        self.exit_price = exit_price
         self.exit_reason = exit_reason
         self.exit_time = timestamp or datetime.now()
+        self._update_pct_stats()  # Update final stats
+        self.logger.info(f"Order {self.name} exited: {exit_reason} at price {exit_price}")
+
+    # Add getter methods
+    def is_active(self):
+        return self.status == "ACTIVE"
+    
+    def get_exit_reason(self):
+        return self.exit_reason
+    
+    def get_exit_price(self):
+        return self.exit_price
+    
+    def get_exit_time(self):
+        return self.exit_time

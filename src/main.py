@@ -25,7 +25,7 @@ logger = get_logger("MAIN")
 
 
 def build():
-    logger.info("Starting VWAP trading system...")
+    logger.info("Starting VWAP trading system...", to_console=True)
     
     # Load configuration
     logger.info("Loading configuration...")
@@ -34,18 +34,18 @@ def build():
     cfg = cfg_mgr.get()
     logger.info(f"Configuration loaded: {cfg}")
     if not cfg:
-        logger.error("Configuration is empty or invalid. Exiting.")
+        logger.error("Configuration is empty or invalid. Exiting.", to_console=True)
         return
 
     # --- streamer first ---
-    logger.info("Initializing streamer...")
+    logger.info("Initializing streamer...", to_console=True)
     if not cfg.get('symbols'):
-        logger.error("No symbols configured for streamer. Exiting.")
+        logger.error("No symbols configured for streamer. Exiting.", to_console=True)
         return
     market = cfg.get('market', 'zerodha')
-    logger.info(f"Selected market: {market}")
+    logger.info(f"Selected market: {market}", to_console=True)
     streamer = get_streamer(cfg)
-    logger.info(f"{market.capitalize()} streamer initialized.")
+    logger.info(f"{market.capitalize()} streamer initialized.", to_console=True)
 
     # Initialize core components
     logger.info("Initializing core components...")
@@ -65,7 +65,6 @@ def build():
     
     # Initialize strategy with configuration
     logger.info("Initializing VWAP strategy...")
-    # Initialize strategy with configuration
     entry_strategy = VwapStrategy(config=cfg)  # Pass config
     logger.info("VWAPStrategy initialized.")
     
@@ -78,8 +77,6 @@ def build():
         market_close=cfg.get('market_close'),
     )
     logger.info("ExitManager initialized.")
-    
-
 
     # Initialize executioner using factory
     logger.info("Initializing executioner...")
@@ -89,23 +86,13 @@ def build():
         logger.error(f"Failed to initialize executioner: {e}")
         return
     logger.info("Executioner initialized.")
-    
-    order_mgr.register_handler(
-        execer.execute_order
-    )  # Register order creation handler with executioner
-    logger.info("OrderManager handler registered with Executioner.")
-    
-    # Initialize quote database using factory
-    logger.info("Initializing QuoteDatabase...")
-    quote_db = get_quote_database(cfg)
-    logger.info("QuoteDatabase initialized.")
 
-    # Initialize the chart server
+    # Initialize chart server and database components
+    logger.info("Initializing chart server and database...")
     chart_server = LiveChartServer(max_candles=100, port=8080)
-    
-    # Initialize backup plotter
-    candle_plotter = CandlePlotter(max_candles=100)
-    logger.info("CandlePlotter initialized as backup visualization")
+    quote_db = get_quote_database(cfg)
+    candle_plotter = CandlePlotter()
+    logger.info("Chart server and database initialized.")
 
     # Handler for new quotes: save to DB, send to CandleMaker, to strategy for exit logic, and to chart for live price
     def handle_quote(quote):
@@ -115,30 +102,31 @@ def build():
         ltp = quote['ltp']
         timestamp = quote.get('timestamp', datetime.now())
         volume = quote.get('volume', 0)
-        order_mgr.update_ltp(name, ltp, timestamp) 
+        
+        # Update order manager with LTP - this will trigger exit analysis
+        order_mgr.update_ltp(name, ltp, timestamp)
         
         # Add real-time price update to chart server
         chart_server.add_quote(quote)
         
-        # Debug candle maker processing
         logger.debug(f"Sending quote to candle_maker for {name}: price={ltp}, volume={volume}")
 
     # Handler for new candles: let strategy decide and create orders
     def handle_candle(name, candle):
         logger.info(f"Processing new candle for {name}: OHLC({candle['open']:.2f},{candle['high']:.2f},{candle['low']:.2f},{candle['close']:.2f}) VWAP({candle.get('vwap', 'N/A')}) Volume({candle.get('volume', 0)}) at {candle['timestamp']}")
         
+        # Send candle to entry strategy for entry signals
         entry_strategy.on_candle(name, candle)
-        order_mgr.update_candle(name, candle)  # Update order manager with new candle data
         
-        # Add candle to chart server with logging
+        # Update order manager with new candle data
+        order_mgr.update_candle(name, candle)
+        
+        # Add candle to chart server and plotter
         chart_server.add_candle(name, candle)
         logger.debug(f"Candle data sent to chart server for {name}")
         
-        # Add candle to backup plotter
         candle_plotter.add_candle(name, candle)
         logger.debug(f"Candle data sent to backup plotter for {name}")
-        
-        ## TODO: add candles to data visualisation classes
 
     # Add debugging wrapper for candle maker
     original_handle_quote_to_candle = candle_maker.handle_quote_to_candle
@@ -158,8 +146,14 @@ def build():
     streamer.register_handler(debug_handle_quote_to_candle)
     candle_maker.register_handler(handle_candle)
     
+    # Register strategy and exit manager with order manager
     entry_strategy.register_handler(order_mgr.get_signal)
     exit_mgr.register_handler(order_mgr.get_signal)
+    
+    # Register order manager with exit manager for exit analysis
+    order_mgr.register_exit_manager(exit_mgr)
+    
+    # Register executioner with order manager
     order_mgr.register_handler(execer.execute_order)
     logger.info("Handlers registered successfully.")
     market = cfg.get('market', 'zerodha')  # <-- Add this line to define 'market'
@@ -170,9 +164,9 @@ def build():
     elif market == 'binance':
         logger.info("Binance selected: no init_kite required.")
 
-    logger.info("Starting system...")
+    logger.info("Starting system...", to_console=True)
     streamer.start()
-    logger.info("System initialised – streaming started")
+    logger.info("System initialised – streaming started", to_console=True)
 
     # Start the chart server
     chart_server.start_server(open_browser=True)
@@ -211,4 +205,4 @@ if __name__ == "__main__":
     try:
         build()
     except Exception as e:
-        logger.error(f"Uncaught exception in main: {e}\n{traceback.format_exc()}")
+        logger.error(f"Uncaught exception in main: {e}\n{traceback.format_exc()}", to_console=True)

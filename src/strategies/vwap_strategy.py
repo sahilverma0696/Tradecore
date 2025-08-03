@@ -39,7 +39,7 @@ class VwapStrategy:
         self.default_quantity = config.get('default_quantity', 75)
         self.positions: Dict[str, dict] = {}
         self._handlers = []  # Entry signal handlers
-        self._logger.info("VWAPStrategy (Entry-only) initialized.")
+        self._logger.info("VWAPStrategy (Entry-only) initialized.", to_console=True)
 
     def register_handler(self, cb):
         """Register a callback for entry signals."""
@@ -77,7 +77,7 @@ class VwapStrategy:
             'quantity': self.default_quantity,
         }
         self.positions[symbol] = entry
-        self._logger.info(f"[ENTRY] {side} {symbol} @ {price} VWAP={vwap}")
+        self._logger.info(f"[ENTRY] {side} {symbol} @ {price} VWAP={vwap}", to_console=True)
         for cb in self._handlers:
             # Pass all relevant info for order creation
             cb(
