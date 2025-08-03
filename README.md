@@ -100,10 +100,23 @@ python -m src.main
 - The system will select Zerodha or Binance based on `"market"` in `trading_config.json`.
 - All order entries and exits are routed through the appropriate executioner class (`ZerodhaExecute` for Zerodha, `BinanceExecute` for Binance).
 
-**To run with Binance as the market using the Makefile:**
-```bash
-make run MARKET=binance
-```
+**To run with Binance as the market:**
+1. Edit `trading_config.json` and set:
+   ```json
+   {
+     "market": "binance",
+     "binance": { ... }
+   }
+   ```
+2. Run:
+   ```bash
+   python3 -m src.main
+   ```
+   or, if using the Makefile:
+   ```bash
+   make run MARKET=binance
+   ```
+- The system will automatically use Binance streamer, candle maker, executioner, and quote database.
 
 ## Running Tests
 
@@ -160,6 +173,7 @@ If you do not see data coming in when using Binance:
 - Run with logging enabled and look for messages like `Received message:` and `Compat quote:` in the logs.
 - If no messages appear, check your internet connection and firewall settings.
 - If you see messages but no candles, verify that the quote handler and candle maker are registered and receiving data.
+- **If you want to switch back to Zerodha, set `"market": "zerodha"` in config and rerun.**
 
 ## License
 

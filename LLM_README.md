@@ -104,13 +104,25 @@ To run the trading system from the `vwap` directory:
 ```bash
 python3 -m src.main
 ```
-- The system will select Zerodha or Binance based on `"market"` in `trading_config.json`.
+- The system will select Zerodha or Binance based on the `"market"` key in `trading_config.json`.
 
-**To run with Binance as the market using the Makefile:**
-```bash
-make run MARKET=binance
-```
-This will start the system with Binance as the selected market (ensure `"market": "binance"` is set in `trading_config.json`).
+**To run with Binance as the market:**
+1. Edit `trading_config.json` and set:
+   ```json
+   {
+     "market": "binance",
+     "binance": { ... }
+   }
+   ```
+2. Run:
+   ```bash
+   python3 -m src.main
+   ```
+   or, if using the Makefile:
+   ```bash
+   make run MARKET=binance
+   ```
+- The system will automatically use Binance streamer, candle maker, executioner, and quote database.
 
 ---
 
@@ -161,3 +173,4 @@ python3 -m unittest tests/test_vwap_flow.py
 - Streaming and candle aggregation are decoupled via handler registration.
 - All stateful objects (orders, trades, quotes) are persisted for reproducibility.
 - System is designed for easy extension and modularity.
+- **Binance support is fully integrated; just set `"market": "binance"` in config and run as above.**

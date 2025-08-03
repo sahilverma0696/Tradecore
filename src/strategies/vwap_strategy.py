@@ -79,7 +79,17 @@ class VwapStrategy:
         self.positions[symbol] = entry
         self._logger.info(f"[ENTRY] {side} {symbol} @ {price} VWAP={vwap}")
         for cb in self._handlers:
-            cb(entry)
+            # Pass all relevant info for order creation
+            cb(
+                signal="ENTER",
+                instrument=symbol,
+                candle=candle,
+                side=side,
+                step=None,
+                trail=None,
+                quantity=self.default_quantity,
+                timestamp=candle['timestamp']
+            )
 
     def get_active_positions(self) -> Dict[str, dict]:
         return self.positions

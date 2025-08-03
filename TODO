@@ -1,3 +1,3 @@
-- Modify ZerodhaStreamer on tick according to data coming https://kite.trade/docs/pykiteconnect/v4/#kiteconnect.KiteTicker
-- KiteConnect, use optimally, has reconnect methods and other things as well
-- Set the code to sleep and start at 9:15 am
+1. Check the updation of ltp and candle to the live order, making sure those values propogate ahead
+2. Check for each update in live order, the exit manager checks if exit condition is true.
+3. Check if exit manager propogates the exit signal ahead.

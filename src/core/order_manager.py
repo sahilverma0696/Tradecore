@@ -20,15 +20,42 @@ class OrderManager:
             self._logger.debug(f"Registering handler {cb.__name__}")
             self._handlers.append(cb)
     
-    def get_signal(self, signal: str, instrument: str):
-        """ Decides based on the singal, what to do with the order. """
+    def get_signal(self, signal: str, instrument: str, **kwargs):
+        """
+        Handles entry and exit signals from strategy and exit manager.
+        signal: "ENTER" or "EXIT"
+        instrument: symbol/instrument name
+        kwargs: additional data (candle, side, step, trail, quantity, timestamp, exit_reason, exit_price)
+        """
         if signal == "ENTER":
             self._logger.info(f"Received ENTER signal for instrument: {instrument}")
-            # Create a new order or handle existing ones
-            pass
+            candle = kwargs.get('candle')
+            side = kwargs.get('side')
+            step = kwargs.get('step')
+            trail = kwargs.get('trail')
+            quantity = kwargs.get('quantity')
+            timestamp = kwargs.get('timestamp', datetime.now())
+            self.create_order(
+                timestamp=timestamp,
+                name=instrument,
+                instrument=instrument,
+                step=step,
+                trail=trail,
+                side=side,
+                candle=candle,
+                quantity=quantity
+            )
         elif signal == "EXIT":
             self._logger.info(f"Received EXIT signal for instrument: {instrument}")
-            pass
+            timestamp = kwargs.get('timestamp', datetime.now())
+            exit_reason = kwargs.get('exit_reason', 'MANUAL')
+            exit_price = kwargs.get('exit_price', 0)
+            self.remove_order(
+                name=instrument,
+                timestamp=timestamp,
+                exit_reason=exit_reason,
+                exit_price=exit_price
+            )
         else:
             self._logger.warning(f"Unknown signal: {signal} for instrument: {instrument}")
             return None
@@ -87,13 +114,6 @@ class OrderManager:
     def update_candle(self, name: str, candle: dict, timestamp=None):
         if name in self._orders:
             self._orders[name].set_current_candle(candle, timestamp)
-
-    def remove_order(self, name: str, timestamp: datetime, exit_reason: str, exit_price: float):
-        order = self._orders.pop(name, None)
-        if order:
-            self._logger.info(f"Order {name} exited: {exit_reason}")
-            self._order_logger.log_exit(order, exit_reason, exit_price)
-        return order
 
     # Helper to iterate
     def all_orders(self):

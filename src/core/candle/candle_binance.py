@@ -40,7 +40,7 @@ class CandleBinance:
         self.register_handler(plotting_handler)
 
     def handle_quote_to_candle(self, quote: dict):
-        self._logger.debug(f"Handling Binance quote: {quote}")
+        # self._logger.debug(f"Handling Binance quote: {quote}")
         ts = quote['ts']
         if isinstance(ts, int):
             ts = datetime.fromtimestamp(ts / 1000)

@@ -77,7 +77,7 @@ class QuoteDatabaseBinance:
                 """
                 cursor.execute(query, list(data.values()))
                 conn.commit()
-                self._logger.debug(f"Saved Binance quote for inst={data['inst']} at {data['ts']}")
+                # self._logger.debug(f"Saved Binance quote for inst={data['inst']} at {data['ts']}")
             except Exception as e:
                 self._logger.error(f"Error saving Binance quote: {e}\n{traceback.format_exc()}")
 

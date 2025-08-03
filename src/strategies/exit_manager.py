@@ -120,7 +120,15 @@ class ExitManager:
 
         pnl = (price - entry_price) * qty if side == 'BUY' else (entry_price - price) * qty
         pnl_pct = (pnl / (entry_price * qty)) * 100 if qty > 0 else 0
-        
 
         self._logger.info(f"EXIT {side} {symbol} @ {price} | P&L: {pnl:.2f} ({pnl_pct:.2f}%) | Qty: {qty} | Reason: {exit_type}")
+        for cb in self._handlers:
+            # Pass all relevant info for order exit
+            cb(
+                signal="EXIT",
+                instrument=symbol,
+                exit_reason=exit_type,
+                exit_price=price,
+                timestamp=timestamp
+            )
 

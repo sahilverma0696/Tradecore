@@ -24,7 +24,7 @@ class BinanceStreamer:
             self._handlers.append(cb)
 
     def _on_message(self, ws, message):
-        self._logger.debug(f"Received message: {message}")  # <-- Add logging
+        # self._logger.debug(f"Received message: {message}")  # <-- Add logging
         try:
             data = json.loads(message)
             # Binance multiplexed streams wrap data in 'stream' and 'data'
@@ -40,7 +40,7 @@ class BinanceStreamer:
                     'volume': float(data.get('v', 0)),
                     'change': float(data.get('P', 0))
                 }
-                self._logger.debug(f"Compat quote: {compat_quote}")  # <-- Add logging
+                # self._logger.debug(f"Compat quote: {compat_quote}")  # <-- Add logging
                 for cb in self._handlers:
                     try:
                         cb(compat_quote)

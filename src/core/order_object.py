@@ -4,7 +4,7 @@ from src.logger_factory import get_logger
 
 
 class OrderObject:
-    def __init__(self, name, instrument, step, trail, side, candle=None):
+    def __init__(self, name, instrument, step, trail, side, candle=None, quantity=None):
         self.logger = get_logger(f"InitOrderObject-{name}")
         self.name = name
         self.instrument = instrument
@@ -19,6 +19,7 @@ class OrderObject:
         self.filled_steps = set()  # TODO: maybe not the best way, the idea is to track which steps have been filled
         self.total_quantity = 0  # total quantity filled in this order
         self.lots = 1.0     # total_quantity * lots, used for position sizing
+        self.quantity = quantity if quantity is not None else 0  # Add quantity property
         
         self.logger.debug(f"Creating OrderObject: {name}, Instrument: {instrument}, Side: {side}, Step: {self.step}, Trail: {self.trail}")
         
@@ -122,3 +123,9 @@ class OrderObject:
     def get_min_pct(self): return self.min_pct
     def get_current_pct(self): return self.current_pct
     def get_retreat(self): return self.retreat
+
+    # Add method to update order on exit (optional, for future extension)
+    def exit(self, exit_price, exit_reason, timestamp=None):
+        self.ltp = exit_price
+        self.exit_reason = exit_reason
+        self.exit_time = timestamp or datetime.now()
