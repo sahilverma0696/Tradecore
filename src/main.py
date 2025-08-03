@@ -17,6 +17,7 @@ from src.strategies.exit_manager import ExitManager
 from src.system_config import get_streamer
 from src.data_store.quote_database_factory import get_quote_database
 from src.core.plotting.live_chart_server import LiveChartServer
+from src.core.plotting.candle_plotter import CandlePlotter
 import os
 import traceback
 
@@ -51,6 +52,10 @@ def build():
     # Initialize candle maker using factory
     candle_maker = get_candle_maker(cfg)
     logger.info(f"CandleMaker initialized: {type(candle_maker).__name__}")
+    
+    # Add debugging for candle maker configuration
+    candle_interval = cfg.get('candle_interval', 60)  # Default 1 minute
+    logger.info(f"Candle interval configured: {candle_interval} seconds")
     
     
     # Initialize order manager and strategy
@@ -97,6 +102,10 @@ def build():
 
     # Initialize the chart server
     chart_server = LiveChartServer(max_candles=100, port=8080)
+    
+    # Initialize backup plotter
+    candle_plotter = CandlePlotter(max_candles=100)
+    logger.info("CandlePlotter initialized as backup visualization")
 
     # Handler for new quotes: save to DB, send to CandleMaker, to strategy for exit logic, and to chart for live price
     def handle_quote(quote):
@@ -110,6 +119,9 @@ def build():
         
         # Add real-time price update to chart server
         chart_server.add_quote(quote)
+        
+        # Debug candle maker processing
+        logger.debug(f"Sending quote to candle_maker for {name}: price={ltp}, volume={volume}")
 
     # Handler for new candles: let strategy decide and create orders
     def handle_candle(name, candle):
@@ -122,15 +134,28 @@ def build():
         chart_server.add_candle(name, candle)
         logger.debug(f"Candle data sent to chart server for {name}")
         
-        ## TODO: add candles to data visualisation classes
+        # Add candle to backup plotter
+        candle_plotter.add_candle(name, candle)
+        logger.debug(f"Candle data sent to backup plotter for {name}")
         
+        ## TODO: add candles to data visualisation classes
 
-
+    # Add debugging wrapper for candle maker
+    original_handle_quote_to_candle = candle_maker.handle_quote_to_candle
+    def debug_handle_quote_to_candle(quote):
+        logger.debug(f"Candle maker processing quote: {quote.get('name', 'unknown')} - {quote.get('ltp', 'no_price')}")
+        try:
+            result = original_handle_quote_to_candle(quote)
+            logger.debug(f"Candle maker processed quote successfully")
+            return result
+        except Exception as e:
+            logger.error(f"Candle maker failed to process quote: {e}")
+            raise
 
     logger.info("Registering handlers for quotes and candles...")
     # Register handlers for quotes and candles
     streamer.register_handler(handle_quote)
-    streamer.register_handler(candle_maker.handle_quote_to_candle)
+    streamer.register_handler(debug_handle_quote_to_candle)
     candle_maker.register_handler(handle_candle)
     
     entry_strategy.register_handler(order_mgr.get_signal)

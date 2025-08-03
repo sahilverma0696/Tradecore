@@ -90,6 +90,11 @@ class LiveChartServer:
                 'current_volume': self.current_volume
             }
         
+        # Add detailed logging about candle data
+        self._logger.debug(f"Processing {len(candles_list)} candles for chart data")
+        for i, candle in enumerate(candles_list[-3:]):  # Log last 3 candles
+            self._logger.debug(f"Candle {len(candles_list)-3+i}: {candle}")
+        
         labels = [c['timestamp'] for c in candles_list]
         ohlc = [{
             'x': c['timestamp'],
@@ -101,13 +106,15 @@ class LiveChartServer:
         
         # Filter out None/null VWAP values and create proper line data
         vwap = []
+        vwap_count = 0
         for c in candles_list:
             if c['vwap'] is not None:
                 vwap.append({'x': c['timestamp'], 'y': c['vwap']})
+                vwap_count += 1
         
         volume = [c['volume'] for c in candles_list]
         
-        self._logger.debug(f"Chart data prepared: {len(ohlc)} candles, {len(vwap)} VWAP points, {len(volume)} volume bars")
+        self._logger.debug(f"Chart data prepared: {len(ohlc)} candles, {vwap_count} VWAP points, {len(volume)} volume bars")
         
         return {
             'labels': labels,
@@ -125,9 +132,10 @@ class LiveChartServer:
 <html>
 <head>
     <title>VWAP Live Chart</title>
-    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0"></script>
-    <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0"></script>
-    <script src="https://cdn.jsdelivr.net/npm/chartjs-chart-financial@0.2.1"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/date-fns@2.29.3/index.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-chart-financial@0.2.1/dist/chartjs-chart-financial.min.js"></script>
     <style>
         body { font-family: Arial, sans-serif; margin: 0; padding: 20px; background-color: #f5f5f5; }
         .container { max-width: 1200px; margin: 0 auto; }
@@ -185,15 +193,11 @@ class LiveChartServer:
                 datasets: [{
                     label: 'OHLC',
                     data: [],
+                    borderColor: '#333',
                     color: {
-                        up: '#26a69a',
-                        down: '#ef5350',
-                        unchanged: '#999999'
-                    },
-                    borderColor: {
-                        up: '#26a69a',
-                        down: '#ef5350',
-                        unchanged: '#999999'
+                        up: 'rgba(38, 166, 154, 0.8)',
+                        down: 'rgba(239, 83, 80, 0.8)',
+                        unchanged: 'rgba(153, 153, 153, 0.8)'
                     }
                 }, {
                     label: 'VWAP',
@@ -203,7 +207,6 @@ class LiveChartServer:
                     backgroundColor: 'transparent',
                     borderWidth: 2,
                     fill: false,
-                    tension: 0.1,
                     pointRadius: 0,
                     pointHoverRadius: 3,
                     yAxisID: 'y'
@@ -313,22 +316,39 @@ class LiveChartServer:
                 .then(data => {
                     console.log('Chart data received:', data);
                     
-                    // Update OHLC data - ensure proper format
+                    // Update OHLC data - convert to proper format for chartjs-chart-financial
                     if (data.ohlc && data.ohlc.length > 0) {
-                        priceChart.data.datasets[0].data = data.ohlc;
-                        console.log('OHLC data updated:', data.ohlc.length, 'candles');
+                        // Convert to the format expected by chartjs-chart-financial
+                        const candlestickData = data.ohlc.map(candle => ({
+                            x: new Date(candle.x),
+                            o: candle.o,
+                            h: candle.h,
+                            l: candle.l,
+                            c: candle.c
+                        }));
+                        priceChart.data.datasets[0].data = candlestickData;
+                        console.log('OHLC candlestick data updated:', candlestickData.length, 'candles');
                     }
                     
                     // Update VWAP data
                     if (data.vwap && data.vwap.length > 0) {
-                        priceChart.data.datasets[1].data = data.vwap;
-                        console.log('VWAP data updated:', data.vwap.length, 'points');
+                        const vwapData = data.vwap.map(point => ({
+                            x: new Date(point.x),
+                            y: point.y
+                        }));
+                        priceChart.data.datasets[1].data = vwapData;
+                        console.log('VWAP data updated:', vwapData.length, 'points');
                     }
                     
                     // Update volume data
                     if (data.labels && data.volume) {
-                        volumeChart.data.labels = data.labels;
-                        volumeChart.data.datasets[0].data = data.volume;
+                        const volumeLabels = data.labels.map(label => new Date(label));
+                        const volumeData = data.volume.map((vol, index) => ({
+                            x: volumeLabels[index],
+                            y: vol
+                        }));
+                        volumeChart.data.labels = volumeLabels;
+                        volumeChart.data.datasets[0].data = volumeData;
                     }
                     
                     // Force chart updates with animation disabled for smoother updates
@@ -349,10 +369,10 @@ class LiveChartServer:
                     }
                     
                     if (data.current_volume !== null && data.current_volume !== undefined) {
-                        document.getElementById('volume').textContent = data.current_volume;
+                        document.getElementById('volume').textContent = data.current_volume.toLocaleString();
                     } else if (data.volume.length > 0) {
                         const lastVolume = data.volume[data.volume.length - 1];
-                        document.getElementById('volume').textContent = lastVolume || '-';
+                        document.getElementById('volume').textContent = lastVolume?.toLocaleString() || '-';
                     }
                     
                     document.getElementById('candle-count').textContent = data.ohlc.length;
@@ -364,7 +384,7 @@ class LiveChartServer:
         setInterval(updateCharts, 500);
         updateCharts(); // Initial load
         
-        console.log('Chart initialized with live price updates every 500ms');
+        console.log('Chart initialized with candlestick OHLC and live price updates every 500ms');
     </script>
 </body>
 </html>'''
