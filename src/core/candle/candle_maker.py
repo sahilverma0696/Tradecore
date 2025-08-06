@@ -8,7 +8,7 @@ import traceback
 
 import pandas as pd
 from src.core.plotting.live_chart_server import LiveChartServer
-from src.core.event_bus import Publisher, Subscriber, QuoteReceived, CandleGenerated
+from src.core.event_bus import Publisher, Subscriber, QuoteEvent, CandleGenerated
 
 DATA_CANDLE_DIR = "data/candles"
 DATA_GRAPH_DIR = "data/graphs"
@@ -34,30 +34,21 @@ class CandleMaker(Publisher, Subscriber):
         self._logger.info(f"CandleMaker initialized with event bus, writing to {self._csv_file}")
         
         # Subscribe to quote events
-        self.subscribe_to_event(QuoteReceived, self._on_quote_event)
+        self.subscribe_to_event(QuoteEvent, self._on_quote_event)
 
     # ------------------------------------------------------------------
-    def _on_quote_event(self, event: QuoteReceived):
+    def _on_quote_event(self, event: QuoteEvent):
         """Handle quote events from event bus."""
-        quote = {
-            'ts': event.timestamp,
-            'inst': event.instrument,
-            'name': event.symbol,
-            'ltp': event.ltp,
-            'last_quantity': event.last_quantity,
-            'volume': event.volume,
-            'change': event.change
-        }
-        self.handle_quote_to_candle(quote)
+        self.handle_quote_to_candle(event)
 
     # ------------------------------------------------------------------
-    def handle_quote_to_candle(self, quote: dict):
-        self._logger.debug(f"Handling quote: {quote}")
-        ts: datetime = quote['ts']
-        inst = quote['inst']
-        name = quote['name']
-        ltp = quote['ltp']
-        vol = quote.get('ltq') or quote.get('last_quantity') or quote.get('volume') or 0
+    def handle_quote_to_candle(self, quote_event: QuoteEvent):
+        self._logger.debug(f"Handling quote: {quote_event}")
+        ts = quote_event.timestamp
+        inst = quote_event.instrument
+        name = quote_event.name
+        ltp = quote_event.ltp
+        vol = quote_event.ltq  # Use last traded quantity as volume
 
         candle_time = ts.replace(second=0, microsecond=0)
         candle_time = candle_time.replace(minute=(candle_time.minute // 5) * 5)

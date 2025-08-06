@@ -1,14 +1,39 @@
 {
   "api_key": "zy7p41049ggnphlu",
   "api_secret": "70mrzeu71ce5ukknuzzwzzn8nmizoi93",
-  "symbols": [260105], 
+  "symbols": [260105],
   "name_symbol": "NIFTY_50",
   "paper_trade": true,
+  "broker": "zerodha",
   "execution": {
     "delta_sell": 0.02,
     "delta_buy": 0.04,
     "max_retries": 3,
-    "retry_delay": 50
+    "retry_delay": 50,
+    "exchange": "NFO",
+    "product": "MIS",
+    "quantities": {
+      "default": 75,
+      "NIFTY_50": 75,
+      "BANKNIFTY": 25
+    }
+  },
+  "executors": {
+    "zerodha": {
+      "exchange": "NFO",
+      "product": "MIS",
+      "variety": "regular"
+    },
+    "binance": {
+      "test_mode": true,
+      "time_in_force": "GTC"
+    },
+    "upstox": {
+      "exchange": "NSE_FO",
+      "product": "I",
+      "validity": "DAY",
+      "instrument_map": {}
+    }
   },
   "exit_steps": [
     [0.02, 0.3],

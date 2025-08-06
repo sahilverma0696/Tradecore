@@ -3,42 +3,129 @@ import time
 import json
 from src.logger_factory import get_logger
 from src.config_manager import ConfigManager
+from .executors import ExecutorFactory, BaseExecutor
 
-class Execute:
+# Legacy Execute class for backward compatibility
+class Execute(BaseExecutor):
+    """Legacy Execute class - now extends BaseExecutor for backward compatibility."""
+    
     def __init__(self, client, paper_trade=True, logger=None, excel_logger=None, expiry=None):
+        # Load trading configuration
+        try:
+            with open('trading_config.json', 'r') as f:
+                config = json.load(f)
+        except FileNotFoundError:
+            config = {}
+        
+        # Extract execution config
+        execution_config = config.get('execution', {})
+        
+        super().__init__(
+            client=client,
+            paper_trade=paper_trade,
+            logger=logger,
+            config=execution_config
+        )
+        
         self.config_manager = ConfigManager()
         self.config_manager.register_watcher(self._config_updated)
         
-        # Load trading configuration
-        with open('trading_config.json', 'r') as f:
-            self.config = json.load(f)
+        # Legacy attributes
+        self.excel_logger = excel_logger
+        self.expiry = expiry
+        self.state = None
+        self.delta_sell = execution_config.get('delta_sell')
+        self.delta_buy = execution_config.get('delta_buy', 0)
         
-        # Get execution config
-        self.execution_config = self.config['execution']
-        self.delta_sell = self.execution_config.get('delta_sell')
-        self.delta_buy = self.execution_config.get('delta_buy', 0)
-        self.max_retries = self.execution_config.get('max_retries', 2)
-        self.retry_delay = self.execution_config.get('retry_delay', 1)
+        # Determine broker type from client
+        self.broker_type = self._detect_broker_type(client)
         
-        self.logger = logger or get_logger("Execute")  # Use provided logger or create default
-        self.excel_logger = excel_logger  # An instance of ExcelTradeLogger for logging trades
-        self.expiry = expiry  # Expiry date for options
-        self.state = None  # Track current trade direction ('long' or 'short')
-        self.open_trades = {}  # Dictionary to store open trades with entry prices and timestamps
-        self.closed_trades = []  # List to store last closed positions
-        self.client = client
-        self.paper_trade = paper_trade  # Paper trading mode
-
         print(f"\nInitializing Execute with configuration:")
         print(f"Paper Trade: {self.paper_trade}")
+        print(f"Broker: {self.broker_type}")
         print(f"Delta SELL: {self.delta_sell}")
         print(f"Delta BUY: {self.delta_buy}")
+    
+    def _detect_broker_type(self, client) -> str:
+        """Detect broker type from client class."""
+        if client is None:
+            return 'unknown'
         
-        if self.logger:
-            self.logger.debug(f"INIT Execute - Paper Trade: {self.paper_trade}, Delta SELL: {self.delta_sell}, Delta BUY: {self.delta_buy}, Max Retries: {self.max_retries}, Retry Delay: {self.retry_delay}")
+        client_class = client.__class__.__name__.lower()
+        
+        if 'kite' in client_class:
+            return 'zerodha'
+        elif 'binance' in client_class:
+            return 'binance'
+        elif 'upstox' in client_class:
+            return 'upstox'
+        else:
+            return 'unknown'
+    
+    def _place_order_impl(self, symbol: str, side: str, quantity: int, order_type: str = "MARKET") -> dict:
+        """Legacy implementation for Zerodha."""
+        if not self.client:
+            raise RuntimeError("Client not initialized")
+        
+        # Legacy Zerodha implementation
+        response = self.client.place_order(
+            variety=self.client.VARIETY_REGULAR,
+            exchange=self.client.EXCHANGE_NFO,
+            tradingsymbol=symbol,
+            transaction_type=self.client.TRANSACTION_TYPE_BUY if side == "BUY" else self.client.TRANSACTION_TYPE_SELL,
+            quantity=quantity,
+            order_type=self.client.ORDER_TYPE_MARKET,
+            product=self.client.PRODUCT_MIS,
+        )
+        
+        return {
+            'order_id': response.get('order_id'),
+            'status': 'PENDING',
+            'price': 0,
+            'raw_response': response
+        }
+    
+    def _get_order_status_impl(self, order_id: str) -> dict:
+        """Legacy implementation."""
+        if not self.client:
+            return None
+        
+        orders = self.client.orders()
+        for order in orders:
+            if order.get('order_id') == order_id:
+                return order
+        return None
+    
+    def _cancel_order_impl(self, order_id: str) -> bool:
+        """Legacy implementation."""
+        if not self.client:
+            return False
+        
+        try:
+            self.client.cancel_order(
+                variety=self.client.VARIETY_REGULAR,
+                order_id=order_id
+            )
+            return True
+        except:
+            return False
+    
+    def _normalize_symbol(self, symbol: str) -> str:
+        """Legacy symbol normalization."""
+        return symbol.upper()
+    
+    def _validate_connection(self) -> bool:
+        """Legacy connection validation."""
+        if not self.client:
+            return False
+        try:
+            self.client.profile()
+            return True
+        except:
+            return False
     
     def _config_updated(self, new_config):
-        """Handle config updates"""
+        """Handle config updates - legacy method."""
         if 'execution' in new_config:
             execution_config = new_config['execution']
             old_delta_sell = self.delta_sell
@@ -53,66 +140,37 @@ class Execute:
                 print(f"\nExecute configuration updated:")
                 print(f"delta_sell: {old_delta_sell} -> {self.delta_sell}")
                 print(f"delta_buy: {old_delta_buy} -> {self.delta_buy}")
-                if self.logger:
-                    self.logger.debug(f"Execute config updated - delta_sell: {self.delta_sell}, delta_buy: {self.delta_buy}")
-    
-    def get_quantity(self, symbol):
-        """Get quantity for a symbol from config"""
-        ## Get quantities from execution config based on symbol and buy or sell action
-        quantities = self.execution_config.get('quantities', {})
-        return quantities.get(symbol, quantities.get('default', 75))
+                self.logger.debug(f"Execute config updated - delta_sell: {self.delta_sell}, delta_buy: {self.delta_buy}")
     
     def round_hundred(self, value):
         """Round the given value to the nearest hundred."""
         return round(value / 100) * 100
     
     def place_order(self, symbol, action, timestamp=''):
-        """Wrapper for placing a market order using the Zerodha Kite SDK, with retry logic.
-        Args:
-            symbol (str): The trading symbol for the order.
-            action (str): 'B' for buy, 'S' for sell.
-            timestamp (str): Optional timestamp for the order, defaults to current time if not provided.
-        Returns:
-            bool: True if order was placed successfully, False otherwise.
-        """
-        quantity = self.get_quantity(symbol)
-        self.logger.debug(f"Attempting to place order: {symbol} {action} quantity: {quantity}")
+        """Legacy place_order method."""
+        # Map legacy action to direction
+        direction = "BUY" if action == "B" else "SELL"
         
-        # Paper trading mode - simulate order placement
-        if self.paper_trade:
-            self.logger.debug(f"PAPER TRADE: Simulating order placement for {symbol} {action} with quantity {quantity}")
-            if self.excel_logger:
-                self.excel_logger.log_trade(symbol, action, None, timestamp)
-            return True
+        if timestamp == '':
+            timestamp = datetime.now()
+        elif isinstance(timestamp, str):
+            timestamp = datetime.now()
         
-        # Real trading mode
-        for attempt in range(self.max_retries):
-            try:
-                # Place a market order with the Zerodha Kite SDK
-                response = self.client.place_order(
-                    variety=self.client.VARIETY_REGULAR,
-                    exchange=self.client.EXCHANGE_NFO,  # NSE Futures & Options
-                    tradingsymbol=symbol,
-                    transaction_type=self.client.TRANSACTION_TYPE_BUY if action == "B" else self.client.TRANSACTION_TYPE_SELL,
-                    quantity=quantity,
-                    order_type=self.client.ORDER_TYPE_MARKET,
-                    product=self.client.PRODUCT_MIS,
-                )
-                
-                self.logger.debug(f"Order placed successfully for {symbol} {action} with quantity {quantity}")
-                if self.excel_logger:
-                    self.excel_logger.log_trade(symbol, action, None, timestamp)
-                return True
-                
-            except Exception as e:
-                self.logger.debug(f"Error placing order for {symbol}: {str(e)}")
-                if attempt < self.max_retries - 1:
-                    time.sleep(self.retry_delay)
-                    self.logger.debug(f"Retrying... ({attempt + 1}/{self.max_retries})")
-        
-        self.logger.debug(f"Failed to place order for {symbol} after {self.max_retries} attempts.")
-        return False
+        return self.execute_order(symbol, direction, timestamp)
+
+
+# Factory function for creating modern executors
+def create_executor(broker: str, client=None, paper_trade=True, config=None) -> BaseExecutor:
+    """
+    Create an executor for the specified broker.
     
-    def execute_order(self, symbol, direction, timestamp):
-        """Execute an order based on symbol and direction"""
-        return self.place_order(symbol, direction, timestamp)
+    Args:
+        broker: Broker name ('zerodha', 'binance', 'upstox')
+        client: Broker-specific client
+        paper_trade: Enable paper trading
+        config: Broker-specific configuration
+    
+    Returns:
+        BaseExecutor: Configured executor instance
+    """
+    return ExecutorFactory.create_executor(broker, client, paper_trade, config)

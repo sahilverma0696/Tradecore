@@ -1,7 +1,7 @@
 """Live Binance ticker to quote handler pipeline."""
 import threading
 import time
-from typing import Callable, List
+from typing import List, Dict, Any
 import json
 import websocket
 import ssl
@@ -9,7 +9,7 @@ import traceback
 from datetime import datetime
 
 from src.logger_factory import get_logger
-from src.core.event_bus import Publisher, QuoteReceived
+from src.core.event_bus import Publisher, QuoteEvent, FullQuoteEvent
 
 class BinanceStreamer(Publisher):
     def __init__(self, symbols: List[str], name_symbol: str):
@@ -21,7 +21,6 @@ class BinanceStreamer(Publisher):
         self._thread = None
 
     def _on_message(self, ws, message):
-        # self._logger.debug(f"Received message: {message}")  # <-- Add logging
         try:
             data = json.loads(message)
             # Binance multiplexed streams wrap data in 'stream' and 'data'
@@ -32,48 +31,43 @@ class BinanceStreamer(Publisher):
                 # Convert Binance timestamp (milliseconds) to datetime
                 timestamp_ms = data.get('E')
                 timestamp = datetime.fromtimestamp(timestamp_ms / 1000) if timestamp_ms else datetime.now()
+                symbol = data.get('s')
                 
-                # Publish quote event
-                quote_event = QuoteReceived(
-                    timestamp=timestamp,
-                    source=self.__class__.__name__,
-                    symbol=data.get('s'),
-                    instrument=data.get('s'),  # Use symbol as instrument for Binance
-                    ltp=float(data.get('c', 0)),
-                    volume=float(data.get('v', 0)),
-                    last_quantity=0,  # Not available in ticker stream
-                    change=float(data.get('P', 0)),
-                    raw_data=data
-                )
-                self.publish_event(quote_event)
+                if symbol:
+                    # Publish simplified QuoteEvent
+                    quote_event = QuoteEvent(
+                        timestamp=timestamp,
+                        source=self.__class__.__name__,
+                        instrument=symbol,
+                        name=self.name_symbol,
+                        ltp=float(data.get('c', 0)),
+                        ltq=0  # Not available in ticker stream
+                    )
+                    self.publish_event(quote_event)
+                    
+                    # Publish FullQuoteEvent for database storage
+                    full_quote_event = FullQuoteEvent(
+                        timestamp=timestamp,
+                        source=self.__class__.__name__,
+                        instrument=symbol,
+                        name=self.name_symbol,
+                        raw_data=data  # Complete raw ticker data
+                    )
+                    self.publish_event(full_quote_event)
+                    
         except Exception as e:
             self._logger.error(f"Error parsing message: {e}\n{traceback.format_exc()}")
 
-    def _on_error(self, ws, error):
-        self._logger.error(f"WebSocket error: {error}")
-
-    def _on_close(self, ws, close_status_code, close_msg):
-        self._logger.warning(f"WebSocket closed: {close_status_code} {close_msg}")
-
-    def _on_open(self, ws):
-        self._logger.info("WebSocket connected.")
-        # No need to send subscribe message for multiplexed streams
-
-    def _run_ws(self):
-        # Helper to run websocket with SSL options
-        self._logger.info("Starting WebSocket thread... _run_ws")
-        self._ws.run_forever(sslopt={"cert_reqs": ssl.CERT_NONE})
-
-    def start(self):
-        # Binance allows multiplexing streams with a single connection
-        self._logger.info("Starting Binance WebSocket connection...")
-        self._logger.debug(f"Symbols: {self.symbols}")  # <-- Add logging
+    # BaseStreamer abstract methods implementation
+    def _setup_connection(self):
+        """Setup Binance WebSocket connection."""
         if not self.symbols:
-            self._logger.error("No symbols provided for Binance WebSocket.")
-            return
+            raise ValueError("No symbols provided for Binance WebSocket.")
+        
         streams = '/'.join([f"{symbol.lower()}@ticker" for symbol in self.symbols])
         url = f"wss://stream.binance.com:9443/stream?streams={streams}"
         self._logger.info(f"Connecting to Binance WebSocket: {url}")
+        
         self._ws = websocket.WebSocketApp(
             url,
             on_message=self._on_message,
@@ -81,15 +75,24 @@ class BinanceStreamer(Publisher):
             on_close=self._on_close,
             on_open=self._on_open
         )
-        self._thread = threading.Thread(target=self._run_ws, daemon=True)
-        self._thread.start()
-        self._logger.info("WebSocket thread started.")
+
+    def _run_connection(self):
+        """Run the WebSocket connection."""
+        try:
+            self._ws.run_forever(sslopt={"cert_reqs": ssl.CERT_NONE})
+        except Exception as e:
+            self._handle_connection_error(e)
+
+    def _cleanup_connection(self):
+        """Cleanup WebSocket connection."""
+        if self._ws:
+            try:
+                self._ws.close()
+            except Exception as e:
+                self._logger.error(f"Error closing WebSocket: {e}")
 
     def get_client(self):
         # Return the Binance client instance (assume it's set up elsewhere)
-        return self._client if hasattr(self, '_client') else None
-        self._logger.info("WebSocket thread started.")
-
-    def get_client(self):
-        # Return the Binance client instance (assume it's set up elsewhere)
-        return self._client if hasattr(self, '_client') else None
+        return getattr(self, '_client', None)
+        """Get the Binance client instance."""
+        return getattr(self, '_client', None)

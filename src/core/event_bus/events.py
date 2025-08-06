@@ -16,8 +16,38 @@ class Event(ABC):
 
 
 @dataclass
+class QuoteEvent(Event):
+    """Simplified quote event for basic market data."""
+    instrument: str  # Can be string or number based on exchange
+    name: str       # Symbol name
+    ltp: float      # Last Traded Price
+    ltq: int        # Last Traded Quantity
+    
+    def __post_init__(self):
+        super().__post_init__()
+        # Ensure required fields are valid
+        if self.ltp <= 0:
+            raise ValueError(f"Invalid LTP: {self.ltp}")
+        if self.ltq < 0:
+            raise ValueError(f"Invalid LTQ: {self.ltq}")
+
+
+@dataclass
+class FullQuoteEvent(Event):
+    """Full quote event containing raw exchange data for database storage."""
+    instrument: str
+    name: str
+    raw_data: Dict[str, Any]  # Complete raw data from exchange
+    
+    def __post_init__(self):
+        super().__post_init__()
+        if not self.raw_data:
+            raise ValueError("Raw data cannot be empty")
+
+
+@dataclass
 class QuoteReceived(Event):
-    """Event fired when a new market quote is received."""
+    """Legacy event - keeping for backward compatibility."""
     symbol: str
     instrument: int
     ltp: float

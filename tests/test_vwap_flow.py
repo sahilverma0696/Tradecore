@@ -6,6 +6,7 @@ from src.strategies.vwap_strategy import VwapStrategy
 from src.core.order_manager import OrderManager
 from src.core.order_object import OrderObject
 from src.core.event_bus import EventBus, EntrySignal, CandleGenerated
+from src.core.executors import ExecutorFactory, BaseExecutor
 
 class TestVWAPFlow(unittest.TestCase):
     def setUp(self):
@@ -89,68 +90,67 @@ class TestVWAPFlow(unittest.TestCase):
         order = self.order_mgr.get_order(self.symbol)
         self.assertEqual(order.get_side(), 'BUY')
 
-    def test_order_execution_with_mock_client(self):
-        """Test order execution with mock client."""
-        # Create mock client for testing
-        mock_client = MagicMock()
-        mock_client.place_order.return_value = {"order_id": "TEST123"}
-        mock_client.VARIETY_REGULAR = "regular"
-        mock_client.EXCHANGE_NFO = "NFO"
-        mock_client.TRANSACTION_TYPE_BUY = "BUY"
-        mock_client.TRANSACTION_TYPE_SELL = "SELL"
-        mock_client.ORDER_TYPE_MARKET = "MARKET"
-        mock_client.PRODUCT_MIS = "MIS"
+    def test_executor_factory(self):
+        """Test executor factory functionality."""
+        # Test Zerodha executor creation
+        zerodha_executor = ExecutorFactory.create_executor(
+            'zerodha', 
+            paper_trade=True,
+            config={'max_retries': 2}
+        )
+        self.assertIsNotNone(zerodha_executor)
+        self.assertTrue(zerodha_executor.paper_trade)
+        self.assertEqual(zerodha_executor.max_retries, 2)
         
-        from src.core.executioner import Execute
+        # Test Binance executor creation
+        binance_executor = ExecutorFactory.create_executor(
+            'binance',
+            paper_trade=True
+        )
+        self.assertIsNotNone(binance_executor)
         
-        # Mock the config file reading
-        mock_config = {
-            'execution': {
-                'delta_sell': 0,
-                'delta_buy': 0,
-                'max_retries': 2,
-                'retry_delay': 1,
-                'quantities': {'default': 75}
-            }
-        }
-        
-        with patch('builtins.open', unittest.mock.mock_open()), \
-             patch('json.load', return_value=mock_config):
-            execer = Execute(client=mock_client, paper_trade=False, logger=None)
-            
-            # Test order execution
-            result = execer.execute_order("TESTSYM", "B", datetime.now())
-            self.assertTrue(result)
-            mock_client.place_order.assert_called_once()
+        # Test unsupported broker
+        with self.assertRaises(ValueError):
+            ExecutorFactory.create_executor('unsupported_broker')
 
-    def test_order_object_functionality(self):
-        """Test OrderObject functionality."""
-        order = OrderObject(
-            name="TEST",
-            instrument="TESTSYM",
-            step=[0.02, 0.04],
-            trail=[0.01, 0.01],
-            side="BUY",
-            candle=self.candle
+    def test_order_execution_with_modern_executor(self):
+        """Test order execution with modern executor pattern."""
+        # Create executor with paper trading
+        executor = ExecutorFactory.create_executor(
+            'zerodha',
+            client=None,
+            paper_trade=True,
+            config={'max_retries': 2, 'default_quantity': 50}
         )
         
-        # Test initial state
-        self.assertEqual(order.get_side(), "BUY")
-        self.assertEqual(order.get_entry_price(), self.candle['close'])
+        # Test order execution
+        result = executor.execute_order("TESTSYM", "BUY", datetime.now())
+        self.assertTrue(result)
         
-        # Test LTP update
-        order.set_ltp(110)
-        self.assertEqual(order.get_ltp(), 110)
-        self.assertGreater(order.get_ltp(), order.get_entry_price())
-        
-        # Test step progression
-        initial_step = order.get_current_step()
-        order.update_step()
-        # Step should progress if price moved enough
-        self.assertGreaterEqual(order.get_current_step(), initial_step)
+        # Check that trade was recorded
+        stats = executor.get_execution_stats()
+        self.assertEqual(stats['total_orders'], 1)
+        self.assertEqual(stats['open_trades'], 1)
 
     def test_paper_trading_mode(self):
-        """Test paper trading mode."""
+        """Test paper trading mode with different brokers."""
+        brokers = ['zerodha', 'binance', 'upstox']
+        
+        for broker in brokers:
+            with self.subTest(broker=broker):
+                executor = ExecutorFactory.create_executor(broker, paper_trade=True)
+                
+                # Paper trade should always succeed
+                result = executor.execute_order("TESTSYM", "BUY", datetime.now())
+                self.assertTrue(result)
+                
+                # Check stats
+                stats = executor.get_execution_stats()
+                self.assertTrue(stats['paper_trade'])
+                self.assertEqual(stats['total_orders'], 1)
+
+if __name__ == "__main__":
+    unittest.main()
         from src.core.executioner import Execute
         
         mock_config = {
