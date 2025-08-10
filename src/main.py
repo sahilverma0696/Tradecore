@@ -2,23 +2,23 @@
 from datetime import datetime
 from src.logger_factory import get_logger
 from src.config_manager import ConfigManager
-from src.core.candle_maker import CandleMaker
+from src.core.candle.candle_maker import CandleMaker
 from src.core.order_manager import OrderManager
 from src.core.executioner import Execute
 from src.strategies.vwap_strategy import VwapStrategy
 from src.strategies.exit_manager import ExitManager
 from src.market.zerodha.zerodha_streamer import ZerodhaStreamer
 from src.market.zerodha.quote_database import QuoteDatabase
+from src.core.event_bus import EventBus, QuoteReceived, EntrySignal, ExitSignal
 
 logger = get_logger("MAIN")
 
 
 def build():
-    logger.info("Starting VWAP trading system...")
+    logger.info("Starting VWAP trading system with event bus...")
     
     # Load configuration
     logger.info("Loading configuration...")
-    # Initialize config manager and load config
     cfg_mgr = ConfigManager()
     cfg = cfg_mgr.get()
     logger.info(f"Configuration loaded: {cfg}")
@@ -26,23 +26,21 @@ def build():
         logger.error("Configuration is empty or invalid. Exiting.")
         return
     
+    # Initialize event bus
+    event_bus = EventBus()
+    logger.info("EventBus initialized")
     
     # Initialize core components
     logger.info("Initializing core components...")
-    # Initialize candle maker
     candle_maker = CandleMaker()
     logger.info("CandleMaker initialized.")
     
-    
-    # Initialize order manager and strategy
     order_mgr = OrderManager()
     logger.info("OrderManager initialized.")
     
-    
     # Initialize strategy with configuration
     logger.info("Initializing VWAP strategy...")
-    # Initialize strategy with configuration
-    entry_strategy = VwapStrategy(config=cfg)  # Pass config
+    entry_strategy = VwapStrategy(config=cfg)
     logger.info("VWAPStrategy initialized.")
     
     # Initialize exit manager
@@ -54,13 +52,12 @@ def build():
         market_close=cfg.get('market_close'),
     )
     logger.info("ExitManager initialized.")
-    
 
+    # Wire exit manager to order manager
+    order_mgr.set_exit_manager(exit_mgr)
 
-    # --- streamer first ---
+    # Initialize streamer
     logger.info("Initializing ZerodhaStreamer...")
-    # Initialize ZerodhaStreamer with configuration
-    logger.info(f"Connecting to Zerodha with symbols: {cfg['symbols']}")
     if not cfg.get('symbols'):
         logger.error("No symbols configured for ZerodhaStreamer. Exiting.")
         return
@@ -72,84 +69,75 @@ def build():
         paper_trade=cfg.get('paper_trade', True),
     )
     logger.info("ZerodhaStreamer initialized.")
+    
     # Initialize executioner
     logger.info("Initializing executioner...")
-    execer = Execute(excel_logger=None, expiry=None, client=streamer.get_kite())
+    execer = streamer.init_kite(cfg.get('access_token'))
     logger.info("Executioner initialized.")
-    
-    order_mgr.register_handler(
-        execer.execute_order
-    )  # Register order creation handler with executioner
-    logger.info("OrderManager handler registered with Executioner.")
     
     # Initialize quote database
     logger.info("Initializing QuoteDatabase...")
     quote_db = QuoteDatabase(symbol=cfg.get('name_symbol'))
     logger.info("QuoteDatabase initialized.")
 
+    # Subscribe to events
+    def handle_quote_for_db(event: QuoteReceived):
+        """Save quotes to database"""
+        quote_dict = {
+            'ts': event.timestamp,
+            'name': event.symbol,
+            'ltp': event.ltp,
+            'timestamp': event.timestamp
+        }
+        quote_db.save_quote(quote_dict)
+        
+        # Update order manager with LTP for exit checking
+        order_mgr.update_ltp(event.symbol, event.ltp, event.timestamp)
 
+    def handle_entry_signal(event: EntrySignal):
+        """Handle entry signals from strategy"""
+        signal_data = {
+            'signal': 'ENTER',
+            'symbol': event.symbol,
+            'side': event.side,
+            'entry_price': event.entry_price,
+            'entry_time': event.timestamp,
+            'name': event.symbol,
+            'entry_vwap': event.entry_vwap,
+            'quantity': event.quantity,
+            'steps': event.exit_steps,
+            'candle': event.candle_data
+        }
+        order_mgr.handle_signal(signal_data)
 
-    # Handler for new quotes: save to DB, send to CandleMaker, and to strategy for exit logic
-    def handle_quote(quote):
-        
-        quote_db.save_quote(quote)  # Save the full quote to the database
-        
-        name = quote['name']
-        ltp = quote['ltp']
-        timestamp = quote.get('timestamp', datetime.now())
-        volume = quote.get('volume', 0)
-        
-        order_mgr.update_ltp(name, ltp, timestamp) 
-        
-        
+    def handle_exit_signal(event: ExitSignal):
+        """Handle exit signals"""
+        signal_data = {
+            'signal': 'EXIT',
+            'symbol': event.symbol,
+            'exit_price': event.exit_price,
+            'exit_reason': event.exit_reason,
+            'quantity': event.quantity,
+            'timestamp': event.timestamp
+        }
+        order_mgr.handle_signal(signal_data)
 
-    # Handler for new candles: let strategy decide and create orders
-    def handle_candle(name, candle):
-        entry_strategy.on_candle(name, candle)
-        order_mgr.update_candle(name, candle)  # Update order manager with new candle data
-        
-        ## TODO: add candles to data visualisation classes
-        
-
-
-
-    logger.info("Registering handlers for quotes and candles...")
-    streamer.register_handler(handle_quote)
-    streamer.register_handler(candle_maker.handle_quote_to_candle)
-    candle_maker.register_handler(handle_candle)
+    logger.info("Subscribing to events...")
+    # Subscribe to events
+    event_bus.subscribe(QuoteReceived, handle_quote_for_db)
+    event_bus.subscribe(EntrySignal, handle_entry_signal)
+    event_bus.subscribe(ExitSignal, handle_exit_signal)
     
-    entry_strategy.register_handler(order_mgr.get_signal)
-    exit_mgr.register_handler(order_mgr.get_signal)
+    # Order manager sends orders to executioner
     order_mgr.register_handler(execer.execute_order)
-    logger.info("Handlers registered successfully.")
-    logger.info("Initializing Kite with access token...")
-    streamer.init_kite(cfg.get('access_token'))
-
-
+    
+    logger.info("Event subscriptions registered successfully.")
+    
     logger.info("Starting system...")
     streamer.start()
 
-    logger.info("System initialised – streaming started")
+    logger.info("System initialised – streaming started with event bus")
 
 
 if __name__ == "__main__":
-    '''
-    1. Basic config needed to setup the system
-    2. The mode selection in the system
-        - This is where you can set the mode to 'live' or 'paper' trading, or backtesting
-        - The mode will be given by arguments, which will be parsed by switch case here
-    3. The build function will be called to start the system
-    4. The system is built on streaming data which can be from a provider or stored db, so it will start streaming quotes
-    5. From quotes, data will be processed to create candles, which will then be used by the strategy to make decisions
-    6. The strategy will create orders based on the candles and the current market conditions
-    7. The orders will be executed by the executioner, which will handle the order
-    8. The system will log all the actions taken, and the results of those actions
-    9. The system will run in a given time frame, which can be set in the config
-    '''
-    
-    '''
-    1. Live trading mode
-    2. Paper trading mode
-    3. Backtesting mode
-    '''
     build()

@@ -1,103 +1,116 @@
 from datetime import datetime
-from typing import Dict
+from typing import Dict, Optional
 from src.logger_factory import get_logger
-import csv
-from dataclasses import asdict
+from src.core.event_bus import Publisher, ExitSignal
 
 
-class ExitManager:
-    """ Takes input of OrderObject and provides exit signals on it"""
+class ExitManager(Publisher):
+    """Takes OrderObject and provides exit signals"""
     def __init__(self, 
                  exit_steps=None,
                  reterival_exit: float = 0.05,
                  default_quantity: int = 75,
                  market_close=None):
-        
-        self.exit_steps = exit_steps
+        super().__init__()
+        self.exit_steps = exit_steps or []
         self.reterival_exit = reterival_exit
         self.default_quantity = default_quantity
         self.market_close = market_close
-        self._handlers = []
-
         self._logger = get_logger("ExitManager")
 
+    def check_exit(self, order, ltp: float, timestamp: datetime) -> Optional[dict]:
+        """Check if order should exit and return exit signal"""
+        
+        # Check step exits
+        step_exit = self._check_step_exits(order, ltp)
+        if step_exit:
+            exit_event = ExitSignal(
+                timestamp=timestamp,
+                source=self.__class__.__name__,
+                symbol=order.get_name(),
+                exit_price=ltp,
+                exit_reason=step_exit,
+                quantity=self.default_quantity
+            )
+            self.publish_event(exit_event)
+            return {
+                'signal': 'EXIT',
+                'symbol': order.get_name(),
+                'exit_price': ltp,
+                'exit_reason': step_exit,
+                'quantity': self.default_quantity,
+                'timestamp': timestamp
+            }
 
-    def register_handler(self, cb):
-        if callable(cb):
-            self._logger.debug(f"Registering handler {cb.__name__}")
-            self._handlers.append(cb)
-            
-    def manage_position(self, symbol: str, price: float, vwap: float,
-                        current_time: datetime, timestamp: datetime, 
-                        positions: Dict[str, dict]):
-        """Manage an existing position, checking for exits."""
-        if symbol not in positions:
-            return
+        # Check trailing stop
+        trail_exit = self._check_trailing_stop(order, ltp)
+        if trail_exit:
+            exit_event = ExitSignal(
+                timestamp=timestamp,
+                source=self.__class__.__name__,
+                symbol=order.get_name(),
+                exit_price=ltp,
+                exit_reason='TRAIL',
+                quantity=order.total_quantity
+            )
+            self.publish_event(exit_event)
+            return {
+                'signal': 'EXIT',
+                'symbol': order.get_name(),
+                'exit_price': ltp,
+                'exit_reason': 'TRAIL',
+                'quantity': order.total_quantity,
+                'timestamp': timestamp
+            }
 
-        position = positions[symbol]
-        side = position['side']
+        # Check time-based exit
+        if self.market_close and timestamp.time() >= self.market_close:
+            exit_event = ExitSignal(
+                timestamp=timestamp,
+                source=self.__class__.__name__,
+                symbol=order.get_name(),
+                exit_price=ltp,
+                exit_reason='TIME',
+                quantity=order.total_quantity
+            )
+            self.publish_event(exit_event)
+            return {
+                'signal': 'EXIT',
+                'symbol': order.get_name(),
+                'exit_price': ltp,
+                'exit_reason': 'TIME',
+                'quantity': order.total_quantity,
+                'timestamp': timestamp
+            }
 
-        # Update price extremes for trailing logic
+        return None
+
+    def _check_step_exits(self, order, ltp: float) -> Optional[str]:
+        """Check for step exits"""
+        entry_price = order.get_entry_price()
+        if not entry_price:
+            return None
+
+        side = order.get_side()
+        profit_ratio = (ltp - entry_price) / entry_price if side == 'BUY' else (entry_price - ltp) / entry_price
+
+        current_step = order.get_current_step()
+        if profit_ratio >= current_step and current_step not in order.filled_steps:
+            order.filled_steps.add(current_step)
+            return f'STEP_{int(current_step*100)}'
+
+        return None
+
+    def _check_trailing_stop(self, order, ltp: float) -> bool:
+        """Check trailing stop based on retracement"""
+        side = order.get_side()
+        
         if side == 'BUY':
-            position['max_profit_price'] = max(position['max_profit_price'], price)
+            retrace = ((order.get_max_price() - ltp) / order.get_max_price()) if order.get_max_price() > 0 else 0
         else:
-            position['min_profit_price'] = min(position['min_profit_price'], price)
+            retrace = ((ltp - order.get_min_price()) / order.get_min_price()) if order.get_min_price() > 0 else 0
 
-        # Check exit conditions
-        self._check_step_exits(symbol, price, position, timestamp)
-        if self._check_trailing_stop(symbol, price, position, timestamp):
-            return
-
-        if current_time >= self.market_close:
-            self._exit_position(symbol, price, timestamp, 'TIME', position, position['remaining_qty'])
-
-        if position['remaining_qty'] <= 0:
-            positions.pop(symbol, None)
-
-    def check_risk_exit(self, symbol: str, price: float, vwap: float,
-                        timestamp: datetime, positions: Dict[str, dict],
-                        safety_pct: float = 0.03):
-        """Check for risk-based exits (hard stop loss + VWAP cross)."""
-        position = positions.get(symbol)
-        if not position or position['remaining_qty'] <= 0:
-            return
-
-        side = position['side']
-        entry = position['entry_price']
-
-        # Safety Exit
-        if (side == 'BUY' and price <= entry * (1 - safety_pct)) or \
-           (side == 'SELL' and price >= entry * (1 + safety_pct)):
-            self._exit_position(symbol, price, timestamp, 'SAFETY', position, position['remaining_qty'])
-            return
-
-        # VWAP Risk Exit
-        if (side == 'BUY' and price < vwap) or (side == 'SELL' and price > vwap):
-            self._exit_position(symbol, price, timestamp, 'RISK', position, position['remaining_qty'])
-
-    def _check_step_exits(self, symbol: str, price: float, position: dict, timestamp: datetime):
-        """Partial profit taking at predefined levels."""
-        entry = position['entry_price']
-        side = position['side']
-        total_qty = position['quantity']
-
-        profit_ratio = (price - entry) / entry if side == 'BUY' else (entry - price) / entry
-
-        for pct, portion in position['steps']:
-            if pct in position['filled_steps']:
-                continue
-
-            if profit_ratio >= pct and position['remaining_qty'] > 0:
-                qty_to_exit = int(total_qty * portion)
-                qty_to_exit = max(self.default_quantity, (qty_to_exit // self.default_quantity) * self.default_quantity)
-                qty_to_exit = min(qty_to_exit, position['remaining_qty'])
-                if qty_to_exit <= 0:
-                    continue
-
-                position['filled_steps'].add(pct)
-                position['remaining_qty'] -= qty_to_exit
-                position['position_size'] = position['remaining_qty'] / total_qty
-                self._exit_position(symbol, price, timestamp, f'STEP_{int(pct*100)}', position, qty_to_exit)
+        return retrace >= self.reterival_exit
 
     def _check_trailing_stop(self, symbol: str, price: float, position: dict, timestamp: datetime) -> bool:
         """Trailing stop based on retracement percentage."""
