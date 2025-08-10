@@ -2,15 +2,14 @@
 from datetime import datetime
 from src.logger_factory import get_logger
 from src.config_manager import ConfigManager
-from src.core.candle_maker import CandleMaker
+from src.core.candle.candle_maker import CandleMaker
 from src.core.order_manager import OrderManager
 from src.core.executioner import Execute
 from src.strategies.vwap_strategy import VwapStrategy
 from src.strategies.exit_manager import ExitManager
 from src.market.zerodha.zerodha_streamer import ZerodhaStreamer
 from src.market.zerodha.quote_database import QuoteDatabase
-from src.market.zerodha.full_quote_database import FullQuoteDatabase
-from src.core.event_bus import EventBus, QuoteEvent, EntrySignal, ExitSignal
+from src.core.event_bus import EventBus, QuoteReceived, EntrySignal, ExitSignal
 
 logger = get_logger("MAIN")
 
@@ -76,17 +75,24 @@ def build():
     execer = streamer.init_kite(cfg.get('access_token'))
     logger.info("Executioner initialized.")
     
-    # Initialize databases
-    logger.info("Initializing Databases...")
+    # Initialize quote database
+    logger.info("Initializing QuoteDatabase...")
     quote_db = QuoteDatabase(symbol=cfg.get('name_symbol'))
-    full_quote_db = FullQuoteDatabase(symbol=cfg.get('name_symbol'))
-    logger.info("Databases initialized.")
+    logger.info("QuoteDatabase initialized.")
 
     # Subscribe to events
-    def handle_quote_for_processing(event: QuoteEvent):
-        """Process quotes for strategy and order management"""
+    def handle_quote_for_db(event: QuoteReceived):
+        """Save quotes to database"""
+        quote_dict = {
+            'ts': event.timestamp,
+            'name': event.symbol,
+            'ltp': event.ltp,
+            'timestamp': event.timestamp
+        }
+        quote_db.save_quote(quote_dict)
+        
         # Update order manager with LTP for exit checking
-        order_mgr.update_ltp(event.name, event.ltp, event.timestamp)
+        order_mgr.update_ltp(event.symbol, event.ltp, event.timestamp)
 
     def handle_entry_signal(event: EntrySignal):
         """Handle entry signals from strategy"""
@@ -118,7 +124,7 @@ def build():
 
     logger.info("Subscribing to events...")
     # Subscribe to events
-    event_bus.subscribe(QuoteEvent, handle_quote_for_processing)
+    event_bus.subscribe(QuoteReceived, handle_quote_for_db)
     event_bus.subscribe(EntrySignal, handle_entry_signal)
     event_bus.subscribe(ExitSignal, handle_exit_signal)
     

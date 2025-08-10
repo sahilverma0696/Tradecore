@@ -28,36 +28,22 @@ class CandleBinance(Publisher, Subscriber):
 
         self._logger.info(f"CandleBinance initialized with event bus, writing to {self._csv_file}")
         
-        # Subscribe to quote events
+        # Subscribe to normalized quote events from Binance streamer
         self.subscribe_to_event(QuoteReceived, self._on_quote_event)
 
     def _on_quote_event(self, event: QuoteReceived):
-        """Handle quote events from event bus."""
-        quote = {
-            'ts': event.timestamp,
-            'inst': event.instrument,
-            'name': event.symbol,
-            'ltp': event.ltp,
-            'volume': event.volume
-        }
-        self.handle_quote_to_candle(quote)
-
-    def register_plotting_handler(self):
-        self._chart_server = LiveChartServer()
-        def plotting_handler(name, candle):
-            self._chart_server.add_candle(name, candle)
-        self.register_handler(plotting_handler)
-        self._chart_server.start_server()
-
-    def handle_quote_to_candle(self, quote: dict):
-        # self._logger.debug(f"Handling Binance quote: {quote}")
-        ts = quote['ts']
-        if isinstance(ts, int):
-            ts = datetime.fromtimestamp(ts / 1000)
-        symbol = quote['inst']
-        name = quote['name']
-        ltp = quote['ltp']
-        vol = quote.get('volume', 0)
+        """Handle normalized quote events from event bus."""
+        self._logger.debug(f"Handling Binance quote event: {event.symbol} @ {event.ltp}")
+        
+        # Only process Binance events (can filter by source if needed)
+        if not event.source.lower().startswith('binance'):
+            return
+            
+        ts = event.timestamp
+        symbol = event.instrument
+        name = event.symbol
+        ltp = event.ltp
+        vol = event.volume or 0
 
         candle_time = ts.replace(second=0, microsecond=0)
         candle_time = candle_time.replace(minute=(candle_time.minute // 5) * 5)
@@ -86,6 +72,17 @@ class CandleBinance(Publisher, Subscriber):
         self._vwap_data[symbol]['cum_vol'] += vol
         self._current[symbol] = current
 
+    def register_plotting_handler(self):
+        self._chart_server = LiveChartServer()
+        
+        def plotting_handler(event: CandleGenerated):
+            # Only plot Binance candles
+            if event.source == self.__class__.__name__:
+                self._chart_server.add_candle(event.symbol, event.candle_data)
+        
+        self.subscribe_to_event(CandleGenerated, plotting_handler)
+        self._chart_server.start_server()
+
     def _finalize(self, symbol, candle):
         cum_tp_vol = self._vwap_data[symbol]['cum_tp_vol']
         cum_vol = self._vwap_data[symbol]['cum_vol']
@@ -108,7 +105,7 @@ class CandleBinance(Publisher, Subscriber):
 
         self._logger.info(f"Finalized Binance candle for {symbol} at {candle['timestamp']} with VWAP {candle['vwap']}")
         
-        # Publish candle event
+        # Publish candle event to event bus
         candle_event = CandleGenerated(
             timestamp=candle['timestamp'],
             source=self.__class__.__name__,
@@ -118,6 +115,9 @@ class CandleBinance(Publisher, Subscriber):
         )
         self.publish_event(candle_event)
 
+    def reset_vwap(self, symbol):
+        self._logger.info(f"Resetting VWAP for {symbol}")
+        self._vwap_data[symbol] = {"cum_tp_vol": 0.0, "cum_vol": 0.0}
     def reset_vwap(self, symbol):
         self._logger.info(f"Resetting VWAP for {symbol}")
         self._vwap_data[symbol] = {"cum_tp_vol": 0.0, "cum_vol": 0.0}

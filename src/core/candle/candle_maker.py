@@ -1,4 +1,4 @@
-"""Simplified CandleMaker producing 5-minute VWAP candles."""
+"""Simplified CandleMaker producing 5-minute VWAP candles with event bus."""
 import csv
 from datetime import datetime
 from collections import defaultdict
@@ -8,7 +8,7 @@ import traceback
 
 import pandas as pd
 from src.core.plotting.live_chart_server import LiveChartServer
-from src.core.event_bus import Publisher, Subscriber, QuoteEvent, CandleGenerated
+from src.core.event_bus import Publisher, Subscriber, QuoteReceived, CandleGenerated
 
 DATA_CANDLE_DIR = "data/candles"
 DATA_GRAPH_DIR = "data/graphs"
@@ -33,22 +33,18 @@ class CandleMaker(Publisher, Subscriber):
 
         self._logger.info(f"CandleMaker initialized with event bus, writing to {self._csv_file}")
         
-        # Subscribe to quote events
-        self.subscribe_to_event(QuoteEvent, self._on_quote_event)
+        # Subscribe to normalized quote events from streamers
+        self.subscribe_to_event(QuoteReceived, self._on_quote_event)
 
-    # ------------------------------------------------------------------
-    def _on_quote_event(self, event: QuoteEvent):
-        """Handle quote events from event bus."""
-        self.handle_quote_to_candle(event)
-
-    # ------------------------------------------------------------------
-    def handle_quote_to_candle(self, quote_event: QuoteEvent):
-        self._logger.debug(f"Handling quote: {quote_event}")
-        ts = quote_event.timestamp
-        inst = quote_event.instrument
-        name = quote_event.name
-        ltp = quote_event.ltp
-        vol = quote_event.ltq  # Use last traded quantity as volume
+    def _on_quote_event(self, event: QuoteReceived):
+        """Handle normalized quote events from event bus."""
+        self._logger.debug(f"Handling quote event: {event.symbol} @ {event.ltp}")
+        
+        ts = event.timestamp
+        inst = event.instrument
+        name = event.symbol
+        ltp = event.ltp
+        vol = event.last_quantity or event.volume or 0
 
         candle_time = ts.replace(second=0, microsecond=0)
         candle_time = candle_time.replace(minute=(candle_time.minute // 5) * 5)
@@ -79,7 +75,6 @@ class CandleMaker(Publisher, Subscriber):
         self._vwap_data[inst]['cum_vol'] += vol
         self._current[inst] = current
 
-    # ------------------------------------------------------------------
     def _finalize(self, inst, candle):
         cum_tp_vol = self._vwap_data[inst]['cum_tp_vol']
         cum_vol = self._vwap_data[inst]['cum_vol']
@@ -103,7 +98,7 @@ class CandleMaker(Publisher, Subscriber):
 
         self._logger.info(f"Finalized candle for {inst} at {candle['timestamp']} with VWAP {candle['vwap']}")
 
-        # Publish candle event
+        # Publish candle event to event bus
         candle_event = CandleGenerated(
             timestamp=candle['timestamp'],
             source=self.__class__.__name__,
@@ -113,17 +108,22 @@ class CandleMaker(Publisher, Subscriber):
         )
         self.publish_event(candle_event)
 
-    # ------------------------------------------------------------------
     def reset_vwap(self, inst):
         """Reset VWAP tracking for a new session if needed."""
         self._logger.info(f"Resetting VWAP for {inst}")
         self._vwap_data[inst] = {"cum_tp_vol": 0.0, "cum_vol": 0.0}
 
-    # ------------------------------------------------------------------
     def register_plotting_handler(self):
+        """Initialize live chart server and subscribe to candle events."""
         self._chart_server = LiveChartServer()
-        def plotting_handler(name, candle):
-            self._chart_server.add_candle(name, candle)
+        
+        def plotting_handler(event: CandleGenerated):
+            self._chart_server.add_candle(event.symbol, event.candle_data)
+        
+        self.subscribe_to_event(CandleGenerated, plotting_handler)
+        self._chart_server.start_server()
+        self.subscribe_to_event(CandleGenerated, plotting_handler)
+        self._chart_server.start_server()
         self.register_handler(plotting_handler)
         self._chart_server.start_server()
         self.register_handler(plotting_handler)
