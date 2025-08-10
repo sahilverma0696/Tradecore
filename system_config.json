@@ -1,0 +1,142 @@
+{
+  "logging": {
+    "level": "INFO",
+    "format": "%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    "file_logging": true,
+    "log_directory": "logs",
+    "max_log_files": 10,
+    "max_log_size_mb": 50,
+    "console_logging": true
+  },
+  "event_bus": {
+    "max_event_history": 10000,
+    "enable_event_logging": true,
+    "thread_pool_size": 4,
+    "event_timeout_seconds": 30,
+    "dead_letter_queue": true
+  },
+  "threading": {
+    "max_worker_threads": 8,
+    "thread_timeout_seconds": 60,
+    "daemon_threads": true,
+    "thread_name_prefix": "VWAP"
+  },
+  "performance": {
+    "enable_profiling": false,
+    "memory_monitoring": false,
+    "performance_logging_interval": 300,
+    "gc_collection_interval": 600
+  },
+  "data_storage": {
+    "sqlite_path": "data/market_data.db",
+    "backup_enabled": true,
+    "backup_interval_hours": 24,
+    "data_retention_days": 30,
+    "compression_enabled": true
+  },
+  "network": {
+    "connection_timeout": 10,
+    "read_timeout": 30,
+    "max_retries": 3,
+    "retry_delay": 1.0,
+    "keepalive": true
+  },
+  "monitoring": {
+    "health_check_interval": 60,
+    "metrics_collection": true,
+    "alert_thresholds": {
+      "memory_usage_percent": 80,
+      "cpu_usage_percent": 90,
+      "event_queue_size": 1000,
+      "error_rate_per_minute": 10
+    }
+  },
+  "security": {
+    "encrypt_logs": false,
+    "api_rate_limiting": true,
+    "max_requests_per_second": 10,
+    "enable_audit_logging": true
+  },
+  "development": {
+    "debug_mode": false,
+    "mock_data": false,
+    "test_mode": false,
+    "verbose_error_messages": true,
+    "enable_hot_reload": true
+  },
+  "cli": {
+    "dashboard_refresh_rate": 1.0,
+    "max_display_rows": 50,
+    "color_output": true,
+    "auto_scroll": true,
+    "save_session": true
+  },
+  "candle_maker": {
+    "default_timeframe": "5min",
+    "max_candles_memory": 1000,
+    "persist_candles": true,
+    "validate_ohlc": true,
+    "calculate_vwap": true
+  },
+  "streamers": {
+    "reconnect_attempts": 5,
+    "reconnect_delay": 5.0,
+    "heartbeat_interval": 30,
+    "buffer_size": 1024,
+    "enable_compression": false
+  },
+  "streamer": {
+    "type": "zerodha",
+    "fallback_type": "binance",
+    "auto_reconnect": true,
+    "max_reconnect_attempts": 10,
+    "reconnect_delay_seconds": 30,
+    "heartbeat_enabled": true,
+    "data_validation": true,
+    "buffer_quotes": true,
+    "max_quote_buffer": 1000
+  },
+  "executor": {
+    "type": "paper",
+    "live_trading_enabled": false,
+    "paper_trade_settings": {
+      "initial_balance": 1000000,
+      "slippage_bps": 5,
+      "latency_ms": 100,
+      "simulate_partial_fills": true,
+      "commission_per_trade": 20
+    },
+    "kite_settings": {
+      "order_variety": "regular",
+      "order_type": "MARKET",
+      "product_type": "MIS",
+      "validity": "DAY",
+      "disclosed_quantity": 0,
+      "trigger_price": 0
+    },
+    "risk_management": {
+      "max_orders_per_second": 2,
+      "max_daily_orders": 100,
+      "position_size_limit": 5000000,
+      "enable_circuit_breaker": true
+    }
+  },
+  "trading_session": {
+    "market_hours": {
+      "start_time": "09:15",
+      "end_time": "15:30",
+      "timezone": "Asia/Kolkata"
+    },
+    "pre_market_data": false,
+    "after_hours_trading": false,
+    "weekend_mode": "disabled",
+    "holiday_check": true
+  },
+  "data_sources": {
+    "primary_streamer": "zerodha",
+    "backup_streamers": ["binance"],
+    "data_redundancy": true,
+    "cross_validation": false,
+    "price_tolerance_percent": 0.1
+  }
+}

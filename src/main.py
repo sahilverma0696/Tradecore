@@ -1,143 +1,166 @@
 """High-level wiring for VWAP trading system."""
-from datetime import datetime
+import signal
+from threading import Event
+
 from src.logger_factory import get_logger
 from src.config_manager import ConfigManager
+from src.system_config_manager import SystemConfigManager
+from src.core.event_bus import EventBus
+
+# Import all components
 from src.core.candle.candle_maker import CandleMaker
 from src.core.order_manager import OrderManager
-from src.core.executioner import Execute
+from src.core.executors.mock_executioner import MockExecutioner
 from src.strategies.vwap_strategy import VwapStrategy
-from src.strategies.exit_manager import ExitManager
-from src.market.zerodha.zerodha_streamer import ZerodhaStreamer
-from src.market.zerodha.quote_database import QuoteDatabase
-from src.core.event_bus import EventBus, QuoteReceived, EntrySignal, ExitSignal
 
-logger = get_logger("MAIN")
+# Import streamers based on system config
+from src.market.offline.offline_streamer import OfflineStreamer
 
+# Global shutdown event
+shutdown_event = Event()
 
-def build():
-    logger.info("Starting VWAP trading system with event bus...")
-    
-    # Load configuration
-    logger.info("Loading configuration...")
-    cfg_mgr = ConfigManager()
-    cfg = cfg_mgr.get()
-    logger.info(f"Configuration loaded: {cfg}")
-    if not cfg:
-        logger.error("Configuration is empty or invalid. Exiting.")
-        return
-    
-    # Initialize event bus
-    event_bus = EventBus()
-    logger.info("EventBus initialized")
-    
-    # Initialize core components
-    logger.info("Initializing core components...")
-    candle_maker = CandleMaker()
-    logger.info("CandleMaker initialized.")
-    
-    order_mgr = OrderManager()
-    logger.info("OrderManager initialized.")
-    
-    # Initialize strategy with configuration
-    logger.info("Initializing VWAP strategy...")
-    entry_strategy = VwapStrategy(config=cfg)
-    logger.info("VWAPStrategy initialized.")
-    
-    # Initialize exit manager
-    logger.info("Initializing ExitManager...")
-    exit_mgr = ExitManager(
-        exit_steps=cfg.get('exit_steps'),
-        reterival_exit=cfg.get('reterival_exit'),
-        default_quantity=cfg.get('default_quantity'),
-        market_close=cfg.get('market_close'),
-    )
-    logger.info("ExitManager initialized.")
+def signal_handler(signum, frame):
+    """Handle shutdown signals gracefully."""
+    logger = get_logger("Main")
+    logger.info("Shutdown signal received, stopping all components...")
+    shutdown_event.set()
 
-    # Wire exit manager to order manager
-    order_mgr.set_exit_manager(exit_mgr)
-
-    # Initialize streamer
-    logger.info("Initializing ZerodhaStreamer...")
-    if not cfg.get('symbols'):
-        logger.error("No symbols configured for ZerodhaStreamer. Exiting.")
-        return
-    streamer = ZerodhaStreamer(
-        symbols=[int(s) for s in cfg['symbols']],
-        api_key=cfg['api_key'],
-        api_secret=cfg['api_secret'],
-        name_symbol=cfg['name_symbol'],
-        paper_trade=cfg.get('paper_trade', True),
-    )
-    logger.info("ZerodhaStreamer initialized.")
+def create_streamer(system_config: SystemConfigManager):
+    """Create appropriate streamer based on system configuration."""
+    logger = get_logger("Main")
+    streamer_config = system_config.get_streamer_config()
+    streamer_type = streamer_config['type']
+    config = streamer_config['config']
     
-    # Initialize executioner
-    logger.info("Initializing executioner...")
-    execer = streamer.init_kite(cfg.get('access_token'))
-    logger.info("Executioner initialized.")
-    
-    # Initialize quote database
-    logger.info("Initializing QuoteDatabase...")
-    quote_db = QuoteDatabase(symbol=cfg.get('name_symbol'))
-    logger.info("QuoteDatabase initialized.")
+    if streamer_type == 'offline':
+        logger.info("Creating offline streamer")
+        return OfflineStreamer(
+            data_dir=config.get('data_dir', 'data'),
+            playback_speed=config.get('playback_speed', 1.0)
+        )
+    elif streamer_type == 'zerodha':
+        logger.info("Creating Zerodha streamer")
+        # Import and create Zerodha streamer
+        from src.market.zerodha.zerodha_streamer import ZerodhaStreamer
+        return ZerodhaStreamer()
+    elif streamer_type == 'binance':
+        logger.info("Creating Binance streamer")
+        # Import and create Binance streamer  
+        from src.market.binance.binance_streamer import BinanceStreamer
+        return BinanceStreamer()
+    else:
+        raise ValueError(f"Unknown streamer type: {streamer_type}")
 
-    # Subscribe to events
-    def handle_quote_for_db(event: QuoteReceived):
-        """Save quotes to database"""
-        quote_dict = {
-            'ts': event.timestamp,
-            'name': event.symbol,
-            'ltp': event.ltp,
-            'timestamp': event.timestamp
-        }
-        quote_db.save_quote(quote_dict)
+def create_executioner(system_config: SystemConfigManager):
+    """Create appropriate executioner based on system configuration."""
+    logger = get_logger("Main")
+    exec_config = system_config.get_executioner_config()
+    exec_type = exec_config['type']
+    config = exec_config['config']
+    
+    if exec_type == 'mock':
+        logger.info("Creating mock executioner")
+        executioner = MockExecutioner()
+        if 'slippage_factor' in config:
+            executioner.set_slippage_factor(config['slippage_factor'])
+        return executioner
+    elif exec_type == 'kite':
+        logger.info("Creating Kite executioner")
+        from src.core.executioner import KiteExecutioner
+        return KiteExecutioner()
+    elif exec_type == 'paper':
+        logger.info("Creating paper executioner")
+        from src.core.executioner import PaperExecutioner
+        return PaperExecutioner()
+    else:
+        raise ValueError(f"Unknown executioner type: {exec_type}")
+
+def main():
+    """Main trading system entry point with system configuration support."""
+    logger = get_logger("Main")
+    logger.info("🚀 Starting Algorithmic Trading System...")
+    
+    # Set up signal handlers
+    signal.signal(signal.SIGINT, signal_handler)
+    signal.signal(signal.SIGTERM, signal_handler)
+    
+    try:
+        # Load configurations
+        system_config = SystemConfigManager()
+        trading_config = ConfigManager()
         
-        # Update order manager with LTP for exit checking
-        order_mgr.update_ltp(event.symbol, event.ltp, event.timestamp)
-
-    def handle_entry_signal(event: EntrySignal):
-        """Handle entry signals from strategy"""
-        signal_data = {
-            'signal': 'ENTER',
-            'symbol': event.symbol,
-            'side': event.side,
-            'entry_price': event.entry_price,
-            'entry_time': event.timestamp,
-            'name': event.symbol,
-            'entry_vwap': event.entry_vwap,
-            'quantity': event.quantity,
-            'steps': event.exit_steps,
-            'candle': event.candle_data
-        }
-        order_mgr.handle_signal(signal_data)
-
-    def handle_exit_signal(event: ExitSignal):
-        """Handle exit signals"""
-        signal_data = {
-            'signal': 'EXIT',
-            'symbol': event.symbol,
-            'exit_price': event.exit_price,
-            'exit_reason': event.exit_reason,
-            'quantity': event.quantity,
-            'timestamp': event.timestamp
-        }
-        order_mgr.handle_signal(signal_data)
-
-    logger.info("Subscribing to events...")
-    # Subscribe to events
-    event_bus.subscribe(QuoteReceived, handle_quote_for_db)
-    event_bus.subscribe(EntrySignal, handle_entry_signal)
-    event_bus.subscribe(ExitSignal, handle_exit_signal)
-    
-    # Order manager sends orders to executioner
-    order_mgr.register_handler(execer.execute_order)
-    
-    logger.info("Event subscriptions registered successfully.")
-    
-    logger.info("Starting system...")
-    streamer.start()
-
-    logger.info("System initialised – streaming started with event bus")
-
+        logger.info(f"System mode: {system_config.get('system.mode', 'offline')}")
+        logger.info(f"Streamer type: {system_config.get('streamer.type', 'offline')}")
+        logger.info(f"Executioner type: {system_config.get('executioner.type', 'mock')}")
+        
+        # Initialize EventBus (singleton)
+        event_bus = EventBus()
+        
+        # Create components based on system configuration
+        streamer = create_streamer(system_config)
+        executioner = create_executioner(system_config)
+        
+        # Initialize core components
+        candle_maker = CandleMaker()
+        order_manager = OrderManager(executioner)
+        strategy = VwapStrategy()
+        
+        logger.info("✅ All components initialized")
+        
+        # Start streaming market data
+        symbols = trading_config.get('symbols', [])
+        if symbols:
+            if hasattr(streamer, 'start_streaming'):
+                streamer.start_streaming(symbols)
+            else:
+                # For legacy streamers that use connect()
+                streamer.connect()
+            logger.info(f"📊 Started streaming for symbols: {symbols}")
+        else:
+            logger.warning("No symbols configured for streaming")
+        
+        # Main loop
+        logger.info("🔄 System running... Press Ctrl+C to stop")
+        
+        while not shutdown_event.is_set():
+            try:
+                # System health check
+                if hasattr(streamer, 'get_status'):
+                    status = streamer.get_status()
+                    if not status.get('is_streaming', False):
+                        logger.warning("Streamer is not active")
+                
+                # Sleep and check for shutdown
+                shutdown_event.wait(timeout=10.0)
+                
+            except KeyboardInterrupt:
+                logger.info("Keyboard interrupt received")
+                break
+                
+    except Exception as e:
+        logger.error(f"Critical error in main: {e}")
+        
+    finally:
+        # Cleanup
+        logger.info("🛑 Shutting down system...")
+        
+        # Stop streamer
+        try:
+            if hasattr(streamer, 'stop_streaming'):
+                streamer.stop_streaming()
+            elif hasattr(streamer, 'disconnect'):
+                streamer.disconnect()
+        except:
+            pass
+            
+        # Stop other components
+        try:
+            if hasattr(order_manager, 'stop'):
+                order_manager.stop()
+        except:
+            pass
+            
+        logger.info("✅ System shutdown complete")
 
 if __name__ == "__main__":
-    build()
+    main()
