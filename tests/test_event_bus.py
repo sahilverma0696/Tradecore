@@ -481,13 +481,13 @@ class TestEventIntegration(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-        expected_flow = [
-            "QuoteReceived",
-            "CandleGenerated", 
-            "EntrySignal",
-            "ExitSignal"
-        ]
-        self.assertEqual(workflow_events, expected_flow)
+    expected_flow = [
+        "QuoteReceived",
+        "CandleGenerated", 
+        "EntrySignal",
+        "ExitSignal"
+    ]
+    self.assertEqual(workflow_events, expected_flow)
 
 
 if __name__ == "__main__":

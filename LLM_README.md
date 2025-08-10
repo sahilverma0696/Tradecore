@@ -1,171 +1,495 @@
-# LLM_README
+# LLM_README - Algorithmic Trading System Architecture
+
+## 🚨 CRITICAL GUIDELINES FOR LLM AGENTS
+
+**ALWAYS READ THIS ENTIRE DOCUMENT BEFORE MAKING ANY CHANGES**
+
+This system follows strict architectural patterns. Violating these patterns will break the system. Follow these rules:
+
+1. **NEVER** create new event types without updating the event bus imports
+2. **ALWAYS** use the EventBus for inter-component communication 
+3. **NEVER** use direct callbacks or handler registration between components
+4. **ALWAYS** inherit from Publisher/Subscriber mixins for event communication
+5. **NEVER** import from the wrong candle maker location
+6. **ALWAYS** check existing tests before implementing new features
+7. **NEVER** modify core architecture without understanding the entire flow
+
+---
 
 ## Project Overview
 
-This is an algorithmic trading system implementing a VWAP (Volume Weighted Average Price) strategy for Indian markets (NSE F&O), using Zerodha Kite APIs for live data and order execution. The system is modular, event-driven, and designed for both live and paper trading. It now includes a real-time CLI dashboard for monitoring trades.
+This is a **production-grade algorithmic trading system** implementing VWAP (Volume Weighted Average Price) strategies for Indian markets (NSE F&O) using Zerodha Kite APIs. The system is built on an **event-driven architecture** with strict separation of concerns.
+
+### Core Philosophy
+- **Event-Driven**: All communication via EventBus singleton
+- **Decoupled Components**: No direct dependencies between modules
+- **Publisher-Subscriber Pattern**: Components publish/subscribe to typed events
+- **Thread-Safe**: Concurrent access handled properly
+- **Testable**: Each component tested in isolation
 
 ---
 
-## Directory Structure
+## 🏗️ SYSTEM ARCHITECTURE
 
-- `src/`
-  - `main.py` — Entry point, wires together all components using EventBus.
-  - `logger_factory.py` — Logger utility.
-  - `config_manager.py` — Loads and hot-reloads JSON config.
-  - `core/`
-    - `event_bus/` — Event-driven communication system with pub-sub pattern.
-    - `order_object.py` — Order object, encapsulates order state.
-    - `order_manager.py` — Manages active orders, subscribes to entry/exit signals.
-    - `order_logger.py` — CSV logger for order entries/exits.
-    - `candle_maker.py` — Aggregates tick data into 5-min candles, computes VWAP.
-    - `executioner.py` — Places orders via KiteConnect or simulates (paper trade).
-  - `cli/`
-    - `dashboard.py` — Real-time CLI dashboard with curses or simple text interface.
-    - `cli_main.py` — CLI entry point with argument parsing.
-    - `demo_data.py` — Demo data generator for testing dashboard.
-  - `market/`
-    - `zerodha_streamer.py` — Handles live tick streaming, publishes QuoteReceived events.
-    - `quote_database.py` — Persists tick data to SQLite, provides historical access.
-  - `strategies/`
-    - `vwap_strategy.py` — Main trading logic, publishes EntrySignal/ExitSignal events.
+### Event Bus Foundation
 
-- `trading_config.json` — Main config file: symbols, credentials, instrument settings, execution params.
-- `logs/` — Log files and CSVs for orders/candles.
-- `requirements.txt` — Python dependencies.
-- `tests/` — Unit tests for all major modules including event bus.
+The **EventBus** is the backbone of the system. ALL components communicate through typed events.
+
+```
+┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
+│   Streamers     │───▶│   EventBus      │◀───│  CandleMaker    │
+│  (Publishers)   │    │   (Singleton)   │    │ (Pub/Sub)       │
+└─────────────────┘    └─────────────────┘    └─────────────────┘
+                              │
+                              ▼
+┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
+│   Strategies    │◀───│   All Events    │───▶│ Order Manager   │
+│  (Subscribers)  │    │   Flow Here     │    │ (Subscriber)    │
+└─────────────────┘    └─────────────────┘    └─────────────────┘
+```
+
+### Component Hierarchy & Base Classes
+
+#### 1. **Event System** (`src/core/event_bus/`)
+```python
+# Base Event Class - ALL events inherit from this
+@dataclass
+class Event(ABC):
+    timestamp: datetime
+    source: str
+
+# Publisher Mixin - Components that SEND events
+class Publisher:
+    def publish_event(self, event: Event)
+
+# Subscriber Mixin - Components that RECEIVE events  
+class Subscriber:
+    def subscribe_to_event(self, event_type: Type[Event], callback)
+```
+
+#### 2. **Core Event Types** (STRICT - Do not modify without updating imports)
+```python
+# Market Data Events
+QuoteReceived     # Raw market quotes from streamers
+CandleGenerated   # 5-minute OHLCV + VWAP candles
+
+# Trading Signal Events  
+EntrySignal       # Strategy entry decisions
+ExitSignal        # Exit condition triggers
+
+# Execution Events
+OrderExecuted     # Successful order placement
+PositionUpdate    # Position status changes
+```
 
 ---
 
-## Event-Driven Architecture
+## 📁 DIRECTORY STRUCTURE (STRICT LOCATIONS)
 
-The system now uses a centralized EventBus for decoupled communication:
+```
+src/
+├── main.py                          # 🎯 ENTRY POINT - EventBus wiring
+├── config_manager.py                # Hot-reload JSON config
+├── logger_factory.py               # Centralized logging
+│
+├── core/
+│   ├── event_bus/                   # 🚨 CORE ARCHITECTURE
+│   │   ├── __init__.py             # Event exports (UPDATE when adding events)
+│   │   ├── event_bus.py            # EventBus singleton (NEVER modify lightly)
+│   │   ├── events.py               # All event definitions
+│   │   └── mixins.py               # Publisher/Subscriber mixins
+│   │
+│   ├── candle_maker.py             # 🎯 USE THIS ONE (not subdirectory)
+│   ├── order_manager.py            # Manages active orders
+│   ├── order_object.py             # Order state encapsulation
+│   ├── order_logger.py             # CSV order logging
+│   └── executioner.py              # Order placement (Kite/Paper)
+│
+├── market/
+│   ├── zerodha/
+│   │   ├── zerodha_streamer.py     # Live tick streaming
+│   │   └── quote_database.py       # SQLite tick persistence
+│   └── binance/
+│       └── binance_streamer.py     # Crypto streaming
+│
+├── strategies/
+│   ├── vwap_strategy.py            # 🎯 MAIN TRADING LOGIC
+│   └── exit_manager.py             # Exit condition handling
+│
+└── cli/
+    ├── dashboard.py                # Real-time monitoring
+    ├── cli_main.py                 # CLI entry point
+    └── demo_data.py                # Testing data generator
 
-### Key Events:
-- `QuoteReceived` — Market data from streamers
-- `CandleGenerated` — 5-minute candles with VWAP
-- `EntrySignal` — Strategy entry decisions
-- `ExitSignal` — Exit conditions met
-- `OrderExecuted` — Successful order placement
+tests/
+├── test_event_bus.py               # 🧪 EventBus comprehensive tests
+├── test_candle_maker.py            # CandleMaker event integration
+└── test_vwap_flow.py               # End-to-end workflow tests
 
-### Data Flow:
-1. **Streamers** (Zerodha/Binance) publish `QuoteReceived` events
-2. **CandleMaker** subscribes to quotes, publishes `CandleGenerated` events
-3. **VwapStrategy** subscribes to candles, publishes `EntrySignal`/`ExitSignal` events
-4. **OrderManager** subscribes to signals, manages orders, calls executioner
-5. **CLI Dashboard** subscribes to all events for real-time monitoring
+trading_config.json                 # 🔧 MAIN CONFIGURATION
+```
 
 ---
 
-## CLI Dashboard
+## 🔄 EVENT FLOW ARCHITECTURE
 
-### Features:
-- **Real-time monitoring** of active positions with live P&L
-- **Recent quotes** with price changes and volume
-- **Signal history** showing entry/exit decisions
-- **System statistics** (uptime, event counts, total P&L)
-- **Color coding** for profits/losses
-- **Two interfaces**: Curses (full-featured) or simple text
+### 1. **Market Data Flow**
+```
+Zerodha/Binance Streamer (Publisher)
+    │ publishes QuoteReceived
+    ▼
+EventBus
+    │ routes to subscribers
+    ▼  
+CandleMaker (Publisher + Subscriber)
+    │ subscribes to QuoteReceived
+    │ aggregates 5-min candles
+    │ publishes CandleGenerated
+    ▼
+VwapStrategy (Subscriber)
+    │ subscribes to CandleGenerated
+    │ analyzes VWAP crossovers
+```
 
-### Usage:
+### 2. **Trading Signal Flow**
+```
+VwapStrategy (Publisher)
+    │ publishes EntrySignal/ExitSignal
+    ▼
+EventBus
+    │ routes to order management
+    ▼
+OrderManager (Subscriber)
+    │ subscribes to Entry/Exit signals
+    │ manages order lifecycle
+    │ calls Executioner for order placement
+```
+
+### 3. **Monitoring Flow**
+```
+All Components (Publishers)
+    │ publish various events
+    ▼
+EventBus
+    │ routes to dashboard
+    ▼
+CLI Dashboard (Subscriber)
+    │ subscribes to ALL event types
+    │ real-time display updates
+```
+
+---
+
+## 🚨 CRITICAL IMPLEMENTATION RULES
+
+### Rule 1: Event Bus Communication ONLY
+```python
+# ✅ CORRECT - Use EventBus
+class MyComponent(Publisher, Subscriber):
+    def __init__(self):
+        super().__init__()
+        self.subscribe_to_event(QuoteReceived, self.handle_quote)
+    
+    def handle_quote(self, event: QuoteReceived):
+        # Process quote
+        new_event = SomeEvent(...)
+        self.publish_event(new_event)
+
+# ❌ WRONG - Direct callbacks
+class BadComponent:
+    def register_handler(self, callback):  # DON'T DO THIS
+        self._handlers.append(callback)
+```
+
+### Rule 2: Correct Imports (ABSOLUTE PATHS)
+```python
+# ✅ CORRECT
+from src.core.event_bus import EventBus, QuoteReceived, CandleGenerated
+from src.core.candle_maker import CandleMaker  # Main one, not subdirectory
+
+# ❌ WRONG  
+from src.core.candle.candle_maker import CandleMaker  # Old location
+```
+
+### Rule 3: Event Type Definitions
+```python
+# ✅ CORRECT - Add to events.py
+@dataclass
+class NewTradingEvent(Event):
+    symbol: str
+    data: Dict[str, Any]
+
+# Then update __init__.py exports
+from .events import (..., NewTradingEvent)
+__all__ = [..., 'NewTradingEvent']
+```
+
+### Rule 4: Component Inheritance Pattern
+```python
+# ✅ CORRECT - Trading components inherit mixins
+class TradingComponent(Publisher, Subscriber):
+    def __init__(self):
+        super().__init__()  # CRITICAL - Initialize both mixins
+        # Subscribe to relevant events
+        self.subscribe_to_event(EventType, self.handler)
+```
+
+---
+
+## 🧪 TESTING ARCHITECTURE
+
+### Test Structure
+```
+tests/
+├── test_event_bus.py          # Core EventBus functionality
+│   ├── Singleton pattern
+│   ├── Pub-sub mechanics  
+│   ├── Thread safety
+│   ├── Error handling
+│   ├── Event history
+│   └── Publisher/Subscriber mixins
+│
+├── test_candle_maker.py       # CandleMaker with EventBus
+└── test_vwap_flow.py          # End-to-end workflow
+```
+
+### Test Patterns
+```python
+# EventBus test pattern
+def setUp(self):
+    EventBus._instance = None  # Reset singleton
+    self.event_bus = EventBus()
+
+def tearDown(self):
+    EventBus._instance = None  # Clean up
+
+# Event flow test pattern
+def test_workflow(self):
+    received_events = []
+    self.event_bus.subscribe(EventType, lambda e: received_events.append(e))
+    
+    # Trigger event
+    component.do_something()
+    
+    # Verify event received
+    self.assertEqual(len(received_events), 1)
+```
+
+---
+
+## 🔧 CONFIGURATION SYSTEM
+
+### trading_config.json Structure
+```json
+{
+  "symbols": ["256265"],           // Instrument tokens
+  "name_symbol": "NIFTY",         // Display name
+  "api_key": "...",               // Kite credentials
+  "paper_trade": true,            // Safe mode
+  "default_quantity": 75,         // Order size
+  "exit_steps": [[0.01, 0.33]],  // Profit taking steps
+  "execution": {                  // Order execution settings
+    "quantities": {"default": 75},
+    "max_retries": 3
+  }
+}
+```
+
+---
+
+## 🖥️ CLI DASHBOARD SYSTEM
+
+### Real-time Event Monitoring
+```python
+# Dashboard subscribes to ALL events
+class TradingDashboard(Subscriber):
+    def __init__(self):
+        super().__init__()
+        self.subscribe_to_event(QuoteReceived, self.update_quotes)
+        self.subscribe_to_event(EntrySignal, self.update_signals)
+        # ... all event types
+
+# Usage
+python3 -m src.cli.cli_main          # Live dashboard
+python3 -m src.cli.cli_main --demo   # Demo mode
+```
+
+---
+
+## 🚀 COMMANDS & USAGE
+
+### Development Commands
 ```bash
 # Main trading system
 python3 -m src.main
 
-# CLI Dashboard (separate terminal)
+# CLI monitoring (separate terminal)
 python3 -m src.cli.cli_main
 
-# Demo mode (generates fake data)
-python3 -m src.cli.cli_main --standalone
-
-# Simple text interface
-python3 -m src.cli.cli_main --no-curses
-```
-
----
-
-## Key Design Patterns
-
-- **Event-driven Architecture**: EventBus singleton with pub-sub pattern for decoupled communication
-- **Strategy-centric**: All trading logic in `vwap_strategy.py`
-- **Order Abstraction**: `OrderObject` encapsulates all state for a trade
-- **Real-time Monitoring**: CLI dashboard provides live trade monitoring
-- **Persistence**: Orders/candles logged to CSV, ticks stored in SQLite
-
----
-
-## Configuration
-
-- `trading_config.json` contains:
-  - `symbols`: List of instrument tokens
-  - `name_symbol`: Mapping for display
-  - `api_key`, `api_secret`, `access_token`: Kite credentials
-  - `paper_trade`: Bool, if true, no live orders
-  - `instrument_config`: Per-symbol step/trail settings
-  - `execution`: Per-symbol order quantities, deltas, retry settings
-
----
-
-## Testing
-
-### Run Tests:
-```bash
-# All tests
+# Run all tests
 python3 -m unittest discover -s tests
 
 # Specific test files
-python3 -m unittest tests/test_vwap_flow.py
-python3 -m unittest tests/test_event_bus.py
+python3 -m unittest tests.test_event_bus
+python3 -m unittest tests.test_candle_maker
 ```
 
-### Test Coverage:
-- Event bus functionality and thread safety
-- VWAP strategy entry/exit logic
-- Order management and execution
-- Mock client integration
-- Dashboard event handling
+### Testing Commands
+```bash
+# Event bus tests (comprehensive)
+python3 -m unittest tests.test_event_bus.TestEventBus.test_singleton_pattern
+python3 -m unittest tests.test_event_bus.TestEventBus.test_thread_safety
+
+# Integration tests
+python3 -m unittest tests.test_vwap_flow
+```
 
 ---
 
-## CLI Dashboard Implementation
+## 🔄 EXTENDING THE SYSTEM
 
-### Components:
-- **TradingDashboard**: Main dashboard class, subscribes to all trading events
-- **Event Handlers**: Process quotes, candles, signals, and orders in real-time
-- **Display Logic**: Curses-based interface with color coding and auto-refresh
-- **Demo Data**: Generates realistic trading data for testing
+### Adding New Event Types
+1. **Define in events.py**
+```python
+@dataclass  
+class NewEvent(Event):
+    field1: str
+    field2: int
+```
 
-### Real-time Features:
-- Live P&L calculation as prices change
-- Position tracking with entry/exit times
-- Signal history with timestamps
-- System performance metrics
-- Auto-refresh every 1-2 seconds
+2. **Update __init__.py exports**
+```python
+from .events import (..., NewEvent)
+__all__ = [..., 'NewEvent']
+```
+
+3. **Create publisher**
+```python
+class EventPublisher(Publisher):
+    def trigger_event(self):
+        event = NewEvent(field1="test", field2=42, 
+                        timestamp=datetime.now(), source=self.__class__.__name__)
+        self.publish_event(event)
+```
+
+4. **Create subscriber**
+```python
+class EventSubscriber(Subscriber):
+    def __init__(self):
+        super().__init__()
+        self.subscribe_to_event(NewEvent, self.handle_new_event)
+```
+
+### Adding New Components
+1. **Inherit from mixins**
+```python
+class NewTradingComponent(Publisher, Subscriber):
+    def __init__(self):
+        super().__init__()  # CRITICAL
+```
+
+2. **Subscribe to relevant events**
+3. **Publish appropriate events**
+4. **Add tests**
 
 ---
 
-## Extending/Modifying
+## ⚠️ COMMON PITFALLS FOR LLM AGENTS
 
-- **To change trading logic**: Edit `src/strategies/vwap_strategy.py`
-- **To add new events**: Add to `src/core/event_bus/events.py`
-- **To customize dashboard**: Modify `src/cli/dashboard.py`
-- **To add new data sources**: Implement new streamer in `src/market/`
+### 1. **Wrong CandleMaker Import**
+```python
+# ❌ WRONG - Old subdirectory structure
+from src.core.candle.candle_maker import CandleMaker
+
+# ✅ CORRECT - Main candle maker
+from src.core.candle_maker import CandleMaker
+```
+
+### 2. **Direct Callback Usage**
+```python
+# ❌ WRONG - Old callback pattern
+component.register_handler(self.handle_data)
+
+# ✅ CORRECT - EventBus pattern
+self.subscribe_to_event(EventType, self.handle_data)
+```
+
+### 3. **Missing Mixin Initialization**
+```python
+# ❌ WRONG - Breaks event system
+class Component(Publisher):
+    def __init__(self):
+        pass  # Missing super().__init__()
+
+# ✅ CORRECT
+class Component(Publisher):
+    def __init__(self):
+        super().__init__()  # CRITICAL
+```
+
+### 4. **Event Type Confusion**
+```python
+# ❌ WRONG - Using wrong event types
+from src.core.streamer.events import QuoteEvent  # Doesn't exist
+
+# ✅ CORRECT - Use defined events
+from src.core.event_bus import QuoteReceived, CandleGenerated
+```
 
 ---
 
-## Requirements
+## 🎯 QUICK REFERENCE FOR LLM AGENTS
 
-- Python 3.10+
-- Dependencies in `requirements.txt`
-- Optional: `windows-curses` for Windows users
-- Terminal with color support for best dashboard experience
+### Before Making ANY Changes:
+1. ✅ Check which components exist and their inheritance
+2. ✅ Verify correct import paths
+3. ✅ Understand event flow for the feature
+4. ✅ Check existing tests for patterns
+5. ✅ Ensure EventBus singleton is properly handled
+
+### When Adding Features:
+1. 🎯 Define events first
+2. 🎯 Update exports in __init__.py
+3. 🎯 Implement Publisher/Subscriber components
+4. 🎯 Add comprehensive tests
+5. 🎯 Update this README if architecture changes
+
+### Testing Requirements:
+- ✅ Event bus singleton reset in setUp/tearDown
+- ✅ Event flow verification
+- ✅ Thread safety for concurrent features
+- ✅ Error handling in event subscribers
 
 ---
 
-## Notes for LLM/AI Assistants
+## 📋 SYSTEM STATUS & CAPABILITIES
 
-- **Event-driven**: All communication now goes through EventBus instead of direct callbacks
-- **Decoupled**: Components communicate via events, making system more modular
-- **Real-time**: CLI dashboard provides live monitoring without affecting trading logic
-- **Testable**: Event system makes it easy to test components in isolation
-- **Extensible**: Easy to add new event types and subscribers
-- **Thread-safe**: EventBus handles concurrent access from multiple threads
+### ✅ Implemented & Tested
+- Event-driven architecture with EventBus singleton
+- Publisher/Subscriber mixins for components
+- Comprehensive event bus tests (singleton, thread-safety, error handling)
+- Market data streaming (Zerodha/Binance)
+- VWAP candle generation with event publishing
+- Trading strategy with entry/exit signals
+- Order management with event subscription
+- Real-time CLI dashboard
+- Configuration hot-reloading
+
+### 🔄 Current Event Types
+- QuoteReceived (market data)
+- CandleGenerated (OHLCV + VWAP)
+- EntrySignal (strategy decisions)  
+- ExitSignal (exit conditions)
+- OrderExecuted (order placement)
+- PositionUpdate (position tracking)
+
+### 🎯 Architecture Strengths
+- **Decoupled**: Components communicate only via events
+- **Testable**: Each component tests in isolation
+- **Extensible**: New events/components easy to add
+- **Thread-safe**: Concurrent access properly handled
+- **Observable**: All system activity flows through EventBus
+
+---
+
+**🚨 REMEMBER: This system's power comes from strict adherence to the event-driven architecture. Breaking these patterns will break the system. When in doubt, follow the existing patterns and test thoroughly.**

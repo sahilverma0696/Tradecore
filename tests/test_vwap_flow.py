@@ -151,25 +151,25 @@ class TestVWAPFlow(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-        from src.core.executioner import Execute
+    from src.core.executioner import Execute
         
-        mock_config = {
-            'execution': {
-                'delta_sell': 0,
-                'delta_buy': 0,
-                'max_retries': 2,
-                'retry_delay': 1,
-                'quantities': {'default': 75}
-            }
+    mock_config = {
+        'execution': {
+            'delta_sell': 0,
+            'delta_buy': 0,
+            'max_retries': 2,
+            'retry_delay': 1,
+            'quantities': {'default': 75}
         }
+    }
+    
+    with patch('builtins.open', unittest.mock.mock_open()), \
+         patch('json.load', return_value=mock_config):
+        execer = Execute(client=None, paper_trade=True, logger=None)
         
-        with patch('builtins.open', unittest.mock.mock_open()), \
-             patch('json.load', return_value=mock_config):
-            execer = Execute(client=None, paper_trade=True, logger=None)
-            
-            # Paper trade should always succeed
-            result = execer.execute_order("TESTSYM", "B", datetime.now())
-            self.assertTrue(result)
+        # Paper trade should always succeed
+        result = execer.execute_order("TESTSYM", "B", datetime.now())
+        self.assertTrue(result)
 
 if __name__ == "__main__":
     unittest.main()
