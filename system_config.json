@@ -86,39 +86,38 @@
     "enable_compression": false
   },
   "streamer": {
-    "type": "zerodha",
-    "fallback_type": "binance",
-    "auto_reconnect": true,
-    "max_reconnect_attempts": 10,
-    "reconnect_delay_seconds": 30,
-    "heartbeat_enabled": true,
-    "data_validation": true,
-    "buffer_quotes": true,
-    "max_quote_buffer": 1000
+    "type": "offline",
+    "config": {
+      "offline": {
+        "base_price": 18500.0,
+        "tick_interval": 1.0,
+        "price_volatility": 0.001
+      },
+      "zerodha": {
+        "reconnect_attempts": 5,
+        "reconnect_delay": 10,
+        "heartbeat_interval": 30
+      },
+      "binance": {
+        "reconnect_attempts": 3,
+        "reconnect_delay": 5,
+        "websocket_timeout": 60
+      }
+    }
   },
   "executor": {
     "type": "paper",
-    "live_trading_enabled": false,
-    "paper_trade_settings": {
-      "initial_balance": 1000000,
-      "slippage_bps": 5,
-      "latency_ms": 100,
-      "simulate_partial_fills": true,
-      "commission_per_trade": 20
-    },
-    "kite_settings": {
-      "order_variety": "regular",
-      "order_type": "MARKET",
-      "product_type": "MIS",
-      "validity": "DAY",
-      "disclosed_quantity": 0,
-      "trigger_price": 0
-    },
-    "risk_management": {
-      "max_orders_per_second": 2,
-      "max_daily_orders": 100,
-      "position_size_limit": 5000000,
-      "enable_circuit_breaker": true
+    "config": {
+      "paper": {
+        "initial_balance": 1000000,
+        "slippage_bps": 5,
+        "commission_per_trade": 20
+      },
+      "kite": {
+        "order_variety": "regular",
+        "product_type": "MIS",
+        "order_timeout": 30
+      }
     }
   },
   "trading_session": {
@@ -139,4 +138,5 @@
     "cross_validation": false,
     "price_tolerance_percent": 0.1
   }
+}
 }

@@ -10,7 +10,7 @@ This system follows strict architectural patterns. Violating these patterns will
 2. **ALWAYS** use the EventBus for inter-component communication 
 3. **NEVER** use direct callbacks or handler registration between components
 4. **ALWAYS** inherit from Publisher/Subscriber mixins for event communication
-5. **NEVER** import from the wrong candle maker location
+5. **NEVER** import from the wrong locations - follow the directory structure
 6. **ALWAYS** check existing tests before implementing new features
 7. **NEVER** modify core architecture without understanding the entire flow
 
@@ -18,12 +18,13 @@ This system follows strict architectural patterns. Violating these patterns will
 
 ## Project Overview
 
-This is a **production-grade algorithmic trading system** implementing VWAP (Volume Weighted Average Price) strategies for Indian markets (NSE F&O) using Zerodha Kite APIs. The system is built on an **event-driven architecture** with strict separation of concerns.
+This is a **production-grade algorithmic trading system** implementing VWAP (Volume Weighted Average Price) strategies for Indian markets (NSE F&O) using multiple broker APIs (Zerodha, Binance, Upstox). The system is built on an **event-driven architecture** with strict separation of concerns and factory patterns for extensibility.
 
 ### Core Philosophy
 - **Event-Driven**: All communication via EventBus singleton
 - **Decoupled Components**: No direct dependencies between modules
 - **Publisher-Subscriber Pattern**: Components publish/subscribe to typed events
+- **Factory Pattern**: Dynamic component creation based on configuration
 - **Thread-Safe**: Concurrent access handled properly
 - **Testable**: Each component tested in isolation
 
@@ -48,48 +49,30 @@ The **EventBus** is the backbone of the system. ALL components communicate throu
 └─────────────────┘    └─────────────────┘    └─────────────────┘
 ```
 
-### Component Hierarchy & Base Classes
+### Factory Pattern Integration
 
-#### 1. **Event System** (`src/core/event_bus/`)
-```python
-# Base Event Class - ALL events inherit from this
-@dataclass
-class Event(ABC):
-    timestamp: datetime
-    source: str
-
-# Publisher Mixin - Components that SEND events
-class Publisher:
-    def publish_event(self, event: Event)
-
-# Subscriber Mixin - Components that RECEIVE events  
-class Subscriber:
-    def subscribe_to_event(self, event_type: Type[Event], callback)
 ```
-
-#### 2. **Core Event Types** (STRICT - Do not modify without updating imports)
-```python
-# Market Data Events
-QuoteReceived     # Raw market quotes from streamers
-CandleGenerated   # 5-minute OHLCV + VWAP candles
-
-# Trading Signal Events  
-EntrySignal       # Strategy entry decisions
-ExitSignal        # Exit condition triggers
-
-# Execution Events
-OrderExecuted     # Successful order placement
-PositionUpdate    # Position status changes
+SystemConfigManager ──┐
+                     ├──► StreamerFactory ──► BaseStreamer
+                     │                          ├── ZerodhaStreamer
+                     │                          ├── BinanceStreamer
+                     │                          └── OfflineStreamer
+                     │
+                     └──► ExecutorFactory ──► BaseExecutor
+                                               ├── ZerodhaExecutor
+                                               ├── MockExecutor
+                                               └── BinanceExecutor
 ```
 
 ---
 
-## 📁 DIRECTORY STRUCTURE (STRICT LOCATIONS)
+## 📁 DIRECTORY STRUCTURE (UPDATED)
 
 ```
 src/
-├── main.py                          # 🎯 ENTRY POINT - EventBus wiring
-├── config_manager.py                # Hot-reload JSON config
+├── main.py                          # 🎯 ENTRY POINT - Factory-based wiring
+├── config_manager.py                # Hot-reload trading config
+├── system_config_manager.py         # System-wide configuration
 ├── logger_factory.py               # Centralized logging
 │
 ├── core/
@@ -99,15 +82,30 @@ src/
 │   │   ├── events.py               # All event definitions
 │   │   └── mixins.py               # Publisher/Subscriber mixins
 │   │
-│   ├── candle_maker.py             # 🎯 USE THIS ONE (not subdirectory)
+│   ├── executors/                   # 🎯 EXECUTION LAYER (Factory Pattern)
+│   │   ├── __init__.py             # Executor exports
+│   │   ├── base_executor.py        # Abstract base for all executors
+│   │   ├── executor_factory.py     # Factory for creating executors
+│   │   ├── mock_executor.py        # Paper trading executor
+│   │   ├── zerodha_executor.py     # Zerodha Kite executor
+│   │   └── binance_executor.py     # Binance executor
+│   │
+│   ├── streamer/                    # 🎯 STREAMING LAYER (Template Pattern)
+│   │   ├── __init__.py             # Streamer exports
+│   │   ├── base_streamer.py        # Abstract base for all streamers
+│   │   ├── quote_normalizer.py     # Standardizes quote formats
+│   │   ├── events.py               # Streamer-specific events
+│   │   └── offline_streamer.py     # Mock data generator
+│   │
+│   ├── candle_maker.py             # 🎯 OHLCV + VWAP candle generation
 │   ├── order_manager.py            # Manages active orders
 │   ├── order_object.py             # Order state encapsulation
 │   ├── order_logger.py             # CSV order logging
-│   └── executioner.py              # Order placement (Kite/Paper)
+│   └── executioner.py              # Legacy executor wrapper
 │
-├── market/
+├── market/                          # 🎯 BROKER-SPECIFIC IMPLEMENTATIONS
 │   ├── zerodha/
-│   │   ├── zerodha_streamer.py     # Live tick streaming
+│   │   ├── zerodha_streamer.py     # Live Kite tick streaming
 │   │   └── quote_database.py       # SQLite tick persistence
 │   └── binance/
 │       └── binance_streamer.py     # Crypto streaming
@@ -124,9 +122,12 @@ src/
 tests/
 ├── test_event_bus.py               # 🧪 EventBus comprehensive tests
 ├── test_candle_maker.py            # CandleMaker event integration
-└── test_vwap_flow.py               # End-to-end workflow tests
+├── test_vwap_flow.py               # End-to-end workflow tests
+├── test_executors.py               # Executor factory tests
+└── test_streamers.py               # Streamer factory tests
 
-trading_config.json                 # 🔧 MAIN CONFIGURATION
+trading_config.json                 # 🔧 TRADING CONFIGURATION
+system_config.json                  # 🔧 SYSTEM CONFIGURATION
 ```
 
 ---
@@ -135,15 +136,15 @@ trading_config.json                 # 🔧 MAIN CONFIGURATION
 
 ### 1. **Market Data Flow**
 ```
-Zerodha/Binance Streamer (Publisher)
-    │ publishes QuoteReceived
+StreamerFactory → BaseStreamer Implementation (Zerodha/Binance/Offline)
+    │ publishes QuoteEvent/QuoteReceived
     ▼
 EventBus
     │ routes to subscribers
     ▼  
 CandleMaker (Publisher + Subscriber)
     │ subscribes to QuoteReceived
-    │ aggregates 5-min candles
+    │ aggregates 5-min candles with VWAP
     │ publishes CandleGenerated
     ▼
 VwapStrategy (Subscriber)
@@ -162,134 +163,167 @@ EventBus
 OrderManager (Subscriber)
     │ subscribes to Entry/Exit signals
     │ manages order lifecycle
-    │ calls Executioner for order placement
+    │ calls ExecutorFactory → BaseExecutor implementation
 ```
 
-### 3. **Monitoring Flow**
+### 3. **Configuration-Driven Component Creation**
 ```
-All Components (Publishers)
-    │ publish various events
+SystemConfigManager
+    │ reads system_config.json
     ▼
-EventBus
-    │ routes to dashboard
-    ▼
-CLI Dashboard (Subscriber)
-    │ subscribes to ALL event types
-    │ real-time display updates
+Main.py
+    │ creates components based on config
+    ├── StreamerFactory.create_streamer(type='zerodha'|'binance'|'offline')
+    └── ExecutorFactory.create_executor(type='zerodha'|'mock'|'binance')
 ```
 
 ---
 
 ## 🚨 CRITICAL IMPLEMENTATION RULES
 
-### Rule 1: Event Bus Communication ONLY
+### Rule 1: Factory Pattern Usage
 ```python
-# ✅ CORRECT - Use EventBus
-class MyComponent(Publisher, Subscriber):
-    def __init__(self):
-        super().__init__()
-        self.subscribe_to_event(QuoteReceived, self.handle_quote)
-    
-    def handle_quote(self, event: QuoteReceived):
-        # Process quote
-        new_event = SomeEvent(...)
-        self.publish_event(new_event)
+# ✅ CORRECT - Use factories for component creation
+from src.core.executors.executor_factory import ExecutorFactory
+from src.system_config_manager import SystemConfigManager
 
-# ❌ WRONG - Direct callbacks
-class BadComponent:
-    def register_handler(self, callback):  # DON'T DO THIS
-        self._handlers.append(callback)
+system_config = SystemConfigManager()
+executor_config = system_config.get_executioner_config()
+executor = ExecutorFactory.create_executor(
+    broker=executor_config['type'],
+    config=executor_config['config']
+)
+
+# ❌ WRONG - Direct instantiation
+from src.core.executors.mock_executor import MockExecutor
+executor = MockExecutor()  # Bypasses factory pattern
 ```
 
-### Rule 2: Correct Imports (ABSOLUTE PATHS)
+### Rule 2: Correct Directory Structure
 ```python
-# ✅ CORRECT
+# ✅ CORRECT - Current structure
+from src.core.executors.base_executor import BaseExecutor
+from src.core.streamer.base_streamer import BaseStreamer
 from src.core.event_bus import EventBus, QuoteReceived, CandleGenerated
-from src.core.candle_maker import CandleMaker  # Main one, not subdirectory
 
-# ❌ WRONG  
-from src.core.candle.candle_maker import CandleMaker  # Old location
+# ❌ WRONG - Old or incorrect paths
+from src.core.executioner import BaseExecutor  # Old location
+from src.core.streamers.base_streamer import BaseStreamer  # Wrong directory
 ```
 
-### Rule 3: Event Type Definitions
+### Rule 3: Configuration Management
 ```python
-# ✅ CORRECT - Add to events.py
-@dataclass
-class NewTradingEvent(Event):
-    symbol: str
-    data: Dict[str, Any]
+# ✅ CORRECT - Use SystemConfigManager for system settings
+from src.system_config_manager import SystemConfigManager
+from src.config_manager import ConfigManager
 
-# Then update __init__.py exports
-from .events import (..., NewTradingEvent)
-__all__ = [..., 'NewTradingEvent']
+system_config = SystemConfigManager()  # system_config.json
+trading_config = ConfigManager()       # trading_config.json
+
+# Get streamer type from system config
+streamer_type = system_config.get('streamer.type', 'offline')
+
+# ❌ WRONG - Hardcoded configurations
+streamer_type = 'zerodha'  # Should come from config
 ```
 
-### Rule 4: Component Inheritance Pattern
+### Rule 4: Abstract Base Class Implementation
 ```python
-# ✅ CORRECT - Trading components inherit mixins
-class TradingComponent(Publisher, Subscriber):
+# ✅ CORRECT - Proper inheritance from base classes
+class CustomExecutor(BaseExecutor):
+    def __init__(self, config: Dict[str, Any] = None):
+        super().__init__(config=config)  # Initialize base class
+    
+    def _place_order_impl(self, symbol, side, quantity, order_type):
+        # Implementation required
+        pass
+
+# ❌ WRONG - Missing base class methods
+class BadExecutor(BaseExecutor):
     def __init__(self):
-        super().__init__()  # CRITICAL - Initialize both mixins
-        # Subscribe to relevant events
-        self.subscribe_to_event(EventType, self.handler)
+        pass  # Missing super().__init__() and required methods
 ```
 
 ---
 
 ## 🧪 TESTING ARCHITECTURE
 
-### Test Structure
+### Test Structure (Updated)
 ```
 tests/
 ├── test_event_bus.py          # Core EventBus functionality
-│   ├── Singleton pattern
-│   ├── Pub-sub mechanics  
-│   ├── Thread safety
-│   ├── Error handling
-│   ├── Event history
-│   └── Publisher/Subscriber mixins
-│
+├── test_executors.py          # ExecutorFactory and implementations
+│   ├── Factory pattern tests
+│   ├── Mock executor tests
+│   ├── Configuration-driven creation
+│   └── Error handling
+├── test_streamers.py          # StreamerFactory and implementations
+│   ├── BaseStreamer template pattern
+│   ├── Offline streamer tests
+│   └── Quote normalization
 ├── test_candle_maker.py       # CandleMaker with EventBus
 └── test_vwap_flow.py          # End-to-end workflow
 ```
 
-### Test Patterns
+### Factory Test Patterns
 ```python
-# EventBus test pattern
-def setUp(self):
-    EventBus._instance = None  # Reset singleton
-    self.event_bus = EventBus()
-
-def tearDown(self):
-    EventBus._instance = None  # Clean up
-
-# Event flow test pattern
-def test_workflow(self):
-    received_events = []
-    self.event_bus.subscribe(EventType, lambda e: received_events.append(e))
+# Factory test pattern
+def test_executor_factory(self):
+    # Test factory creates correct type
+    mock_executor = ExecutorFactory.create_executor('mock')
+    self.assertIsInstance(mock_executor, MockExecutor)
     
-    # Trigger event
-    component.do_something()
+    # Test configuration passing
+    config = {'slippage_factor': 0.01}
+    executor = ExecutorFactory.create_executor('mock', config=config)
+    self.assertEqual(executor.slippage_factor, 0.01)
     
-    # Verify event received
-    self.assertEqual(len(received_events), 1)
+    # Test invalid broker handling
+    with self.assertRaises(ValueError):
+        ExecutorFactory.create_executor('invalid_broker')
 ```
 
 ---
 
-## 🔧 CONFIGURATION SYSTEM
+## 🔧 CONFIGURATION SYSTEM (UPDATED)
 
-### trading_config.json Structure
+### system_config.json Structure (System-wide settings)
 ```json
 {
-  "symbols": ["256265"],           // Instrument tokens
-  "name_symbol": "NIFTY",         // Display name
-  "api_key": "...",               // Kite credentials
-  "paper_trade": true,            // Safe mode
-  "default_quantity": 75,         // Order size
-  "exit_steps": [[0.01, 0.33]],  // Profit taking steps
-  "execution": {                  // Order execution settings
-    "quantities": {"default": 75},
+  "streamer": {
+    "type": "offline",
+    "config": {
+      "offline": {
+        "tick_interval": 1.0,
+        "base_price": 18500.0
+      },
+      "zerodha": {
+        "reconnect_attempts": 5
+      }
+    }
+  },
+  "executor": {
+    "type": "mock",
+    "config": {
+      "mock": {
+        "slippage_factor": 0.0001,
+        "initial_cash": 100000.0
+      }
+    }
+  }
+}
+```
+
+### trading_config.json Structure (Trading-specific settings)
+```json
+{
+  "symbols": ["260105"],
+  "name_symbol": "NIFTY_50",
+  "paper_trade": true,
+  "default_quantity": 75,
+  "exit_steps": [[0.02, 0.3], [0.04, 0.3]],
+  "execution": {
+    "delta_sell": 0.02,
     "max_retries": 3
   }
 }
@@ -297,182 +331,148 @@ def test_workflow(self):
 
 ---
 
-## 🖥️ CLI DASHBOARD SYSTEM
+## 🎯 EXTENDING THE SYSTEM
 
-### Real-time Event Monitoring
+### Adding New Executors
+1. **Create executor class**
 ```python
-# Dashboard subscribes to ALL events
-class TradingDashboard(Subscriber):
-    def __init__(self):
-        super().__init__()
-        self.subscribe_to_event(QuoteReceived, self.update_quotes)
-        self.subscribe_to_event(EntrySignal, self.update_signals)
-        # ... all event types
-
-# Usage
-python3 -m src.cli.cli_main          # Live dashboard
-python3 -m src.cli.cli_main --demo   # Demo mode
+class NewBrokerExecutor(BaseExecutor):
+    def _place_order_impl(self, symbol, side, quantity, order_type):
+        # Broker-specific implementation
+        pass
 ```
 
----
-
-## 🚀 COMMANDS & USAGE
-
-### Development Commands
-```bash
-# Main trading system
-python3 -m src.main
-
-# CLI monitoring (separate terminal)
-python3 -m src.cli.cli_main
-
-# Run all tests
-python3 -m unittest discover -s tests
-
-# Specific test files
-python3 -m unittest tests.test_event_bus
-python3 -m unittest tests.test_candle_maker
-```
-
-### Testing Commands
-```bash
-# Event bus tests (comprehensive)
-python3 -m unittest tests.test_event_bus.TestEventBus.test_singleton_pattern
-python3 -m unittest tests.test_event_bus.TestEventBus.test_thread_safety
-
-# Integration tests
-python3 -m unittest tests.test_vwap_flow
-```
-
----
-
-## 🔄 EXTENDING THE SYSTEM
-
-### Adding New Event Types
-1. **Define in events.py**
+2. **Register with factory**
 ```python
-@dataclass  
-class NewEvent(Event):
-    field1: str
-    field2: int
+ExecutorFactory.register_executor('new_broker', NewBrokerExecutor)
 ```
 
-2. **Update __init__.py exports**
+3. **Update system_config.json**
+```json
+{
+  "executor": {
+    "type": "new_broker",
+    "config": {
+      "new_broker": {
+        "api_key": "xxx",
+        "secret": "yyy"
+      }
+    }
+  }
+}
+```
+
+### Adding New Streamers
+1. **Create streamer class**
 ```python
-from .events import (..., NewEvent)
-__all__ = [..., 'NewEvent']
+class NewExchangeStreamer(BaseStreamer):
+    def _setup_connection(self):
+        # Exchange-specific setup
+        pass
+        
+    def _normalize_raw_data(self, raw_data, symbol):
+        # Exchange-specific normalization
+        pass
 ```
 
-3. **Create publisher**
-```python
-class EventPublisher(Publisher):
-    def trigger_event(self):
-        event = NewEvent(field1="test", field2=42, 
-                        timestamp=datetime.now(), source=self.__class__.__name__)
-        self.publish_event(event)
+2. **Update directory structure**
 ```
-
-4. **Create subscriber**
-```python
-class EventSubscriber(Subscriber):
-    def __init__(self):
-        super().__init__()
-        self.subscribe_to_event(NewEvent, self.handle_new_event)
+src/market/new_exchange/
+├── new_exchange_streamer.py
+└── market_data_handler.py
 ```
-
-### Adding New Components
-1. **Inherit from mixins**
-```python
-class NewTradingComponent(Publisher, Subscriber):
-    def __init__(self):
-        super().__init__()  # CRITICAL
-```
-
-2. **Subscribe to relevant events**
-3. **Publish appropriate events**
-4. **Add tests**
 
 ---
 
 ## ⚠️ COMMON PITFALLS FOR LLM AGENTS
 
-### 1. **Wrong CandleMaker Import**
+### 1. **Wrong Directory Structure**
 ```python
-# ❌ WRONG - Old subdirectory structure
-from src.core.candle.candle_maker import CandleMaker
+# ❌ WRONG - Incorrect paths
+from src.core.executors.executor_factory import ExecutorFactory  # Correct
+from src.core.executor_factory import ExecutorFactory            # Wrong
 
-# ✅ CORRECT - Main candle maker
-from src.core.candle_maker import CandleMaker
+# ✅ CORRECT - Follow directory structure
+from src.core.executors.executor_factory import ExecutorFactory
+from src.core.streamer.base_streamer import BaseStreamer
 ```
 
-### 2. **Direct Callback Usage**
+### 2. **Bypassing Factory Pattern**
 ```python
-# ❌ WRONG - Old callback pattern
-component.register_handler(self.handle_data)
+# ❌ WRONG - Direct instantiation
+from src.core.executors.mock_executor import MockExecutor
+executor = MockExecutor()
 
-# ✅ CORRECT - EventBus pattern
-self.subscribe_to_event(EventType, self.handle_data)
+# ✅ CORRECT - Use factory
+from src.core.executors.executor_factory import ExecutorFactory
+executor = ExecutorFactory.create_executor('mock', config=config)
 ```
 
-### 3. **Missing Mixin Initialization**
+### 3. **Configuration Confusion**
 ```python
-# ❌ WRONG - Breaks event system
-class Component(Publisher):
+# ❌ WRONG - Mixing configuration types
+system_config = ConfigManager()        # Should be SystemConfigManager
+trading_config = SystemConfigManager() # Should be ConfigManager
+
+# ✅ CORRECT - Use appropriate config managers
+system_config = SystemConfigManager()   # For system settings
+trading_config = ConfigManager()        # For trading settings
+```
+
+### 4. **Missing Abstract Method Implementation**
+```python
+# ❌ WRONG - Incomplete base class implementation
+class CustomExecutor(BaseExecutor):
     def __init__(self):
-        pass  # Missing super().__init__()
+        super().__init__()
+    # Missing required abstract methods
 
-# ✅ CORRECT
-class Component(Publisher):
-    def __init__(self):
-        super().__init__()  # CRITICAL
-```
-
-### 4. **Event Type Confusion**
-```python
-# ❌ WRONG - Using wrong event types
-from src.core.streamer.events import QuoteEvent  # Doesn't exist
-
-# ✅ CORRECT - Use defined events
-from src.core.event_bus import QuoteReceived, CandleGenerated
+# ✅ CORRECT - Implement all abstract methods
+class CustomExecutor(BaseExecutor):
+    def _place_order_impl(self, symbol, side, quantity, order_type):
+        pass
+    
+    def _get_order_status_impl(self, order_id):
+        pass
+    
+    # ... other required methods
 ```
 
 ---
 
-## 🎯 QUICK REFERENCE FOR LLM AGENTS
-
-### Before Making ANY Changes:
-1. ✅ Check which components exist and their inheritance
-2. ✅ Verify correct import paths
-3. ✅ Understand event flow for the feature
-4. ✅ Check existing tests for patterns
-5. ✅ Ensure EventBus singleton is properly handled
-
-### When Adding Features:
-1. 🎯 Define events first
-2. 🎯 Update exports in __init__.py
-3. 🎯 Implement Publisher/Subscriber components
-4. 🎯 Add comprehensive tests
-5. 🎯 Update this README if architecture changes
-
-### Testing Requirements:
-- ✅ Event bus singleton reset in setUp/tearDown
-- ✅ Event flow verification
-- ✅ Thread safety for concurrent features
-- ✅ Error handling in event subscribers
-
----
-
-## 📋 SYSTEM STATUS & CAPABILITIES
+## 📋 SYSTEM STATUS & CAPABILITIES (UPDATED)
 
 ### ✅ Implemented & Tested
 - Event-driven architecture with EventBus singleton
+- Factory pattern for executors and streamers
+- Configuration-driven component creation
+- Abstract base classes with template method pattern
+- Mock/offline components for testing
+- System and trading configuration separation
 - Publisher/Subscriber mixins for components
-- Comprehensive event bus tests (singleton, thread-safety, error handling)
-- Market data streaming (Zerodha/Binance)
-- VWAP candle generation with event publishing
-- Trading strategy with entry/exit signals
-- Order management with event subscription
-- Real-time CLI dashboard
+
+### 🔄 Current Component Types
+**Executors:**
+- MockExecutor (paper trading)
+- ZerodhaExecutor (Kite API)
+- BinanceExecutor (Binance API)
+
+**Streamers:**
+- OfflineStreamer (demo data)
+- ZerodhaStreamer (live Kite data)
+- BinanceStreamer (live crypto data)
+
+### 🎯 Architecture Strengths
+- **Factory-driven**: Dynamic component creation based on configuration
+- **Template Pattern**: Consistent behavior across implementations
+- **Configuration-separated**: System vs trading settings clearly divided
+- **Extensible**: Easy to add new brokers/exchanges
+- **Testable**: Mock implementations for all components
+- **Type-safe**: Strong typing with abstract base classes
+
+---
+
+**🚨 REMEMBER: This system's power comes from the factory pattern combined with event-driven architecture. Always use factories for component creation and follow the established directory structure. When in doubt, check the existing patterns and test thoroughly.**
 - Configuration hot-reloading
 
 ### 🔄 Current Event Types

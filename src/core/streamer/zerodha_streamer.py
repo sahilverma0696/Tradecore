@@ -9,8 +9,14 @@ from kiteconnect import KiteConnect, KiteTicker
 from src.logger_factory import get_logger
 from src.core.executioner import Execute
 from src.core.event_bus import Publisher, QuoteEvent, FullQuoteEvent
+from .base_streamer import BaseStreamer
+from .quote_normalizer import QuoteNormalizer
+from .events import QuoteEvent
 
-class ZerodhaStreamer(Publisher):
+
+class ZerodhaStreamer(BaseStreamer):
+    """Zerodha KiteTicker streamer implementation."""
+    
     def __init__(
         self,
         symbols: List[int],
@@ -20,12 +26,14 @@ class ZerodhaStreamer(Publisher):
         name_symbol: str,
         paper_trade: bool = True,
     ):
-        super().__init__()
-        self.symbols = symbols
+        # Convert int symbols to strings for BaseStreamer
+        symbol_strings = [str(s) for s in symbols]
+        super().__init__(symbol_strings, name="ZerodhaStreamer")
+        
+        self.symbols = symbols  # Keep original int symbols for Kite
         self.api_key = api_key
         self.api_secret = api_secret
         self.name_symbol = name_symbol
-        self._logger = get_logger("ZerodhaStreamer")
         self._kite: KiteConnect | None = None
         self._ticker: KiteTicker | None = None
         self._paper = paper_trade
@@ -100,28 +108,8 @@ class ZerodhaStreamer(Publisher):
                 continue
 
             try:
-                ts = t.get('timestamp') or t.get('exchange_timestamp') or datetime.now()
-                
-                # Publish simplified QuoteEvent for strategy processing
-                quote_event = QuoteEvent(
-                    timestamp=ts,
-                    source=self.__class__.__name__,
-                    instrument=str(tok),
-                    name=self.name_symbol,
-                    ltp=t.get('last_price', 0),
-                    ltq=t.get('last_quantity', 0)
-                )
-                self.publish_event(quote_event)
-                
-                # Publish FullQuoteEvent for database storage
-                full_quote_event = FullQuoteEvent(
-                    timestamp=ts,
-                    source=self.__class__.__name__,
-                    instrument=str(tok),
-                    name=self.name_symbol,
-                    raw_data=t  # Complete raw tick data
-                )
-                self.publish_event(full_quote_event)
+                # Use the base class method for processing
+                self._process_raw_quote(t, str(tok))
                 
             except Exception as e:
                 self._logger.error(f"Error processing tick: {e}")
@@ -129,6 +117,18 @@ class ZerodhaStreamer(Publisher):
     def _on_connect(self, ws, response):
         """Handle ticker connection."""
         self._logger.info("Ticker connected. Subscribing to symbols ...")
+        ws.subscribe(self.symbols)
+        ws.set_mode(ws.MODE_FULL, self.symbols)
+
+    def _on_close(self, ws, code, reason):
+        """Handle ticker disconnection."""
+        self._logger.warning(f"Ticker closed: {code} {reason}")
+        self._is_running = False
+
+    def _on_error(self, ws, code, reason):
+        """Handle ticker errors."""
+        self._logger.error(f"Ticker error: {code} {reason}")
+        self._handle_connection_error(Exception(f"Ticker error: {code} {reason}"))
         ws.subscribe(self.symbols)
         ws.set_mode(ws.MODE_FULL, self.symbols)
 

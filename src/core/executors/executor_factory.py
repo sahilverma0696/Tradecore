@@ -1,19 +1,39 @@
 from typing import Dict, Any, Optional
 from .base_executor import BaseExecutor
-from .zerodha_executor import ZerodhaExecutor
-from .binance_executor import BinanceExecutor
-from .upstox_executor import UpstoxExecutor
+from .mock_executor import MockExecutor
 from src.logger_factory import get_logger
+
+# Import broker executors with fallback handling
+try:
+    from .zerodha_executor import ZerodhaExecutor
+except ImportError:
+    ZerodhaExecutor = None
+
+try:
+    from .binance_executor import BinanceExecutor
+except ImportError:
+    BinanceExecutor = None
+
+try:
+    from .upstox_executor import UpstoxExecutor
+except ImportError:
+    UpstoxExecutor = None
 
 
 class ExecutorFactory:
     """Factory for creating executor instances based on broker type."""
     
     EXECUTOR_CLASSES = {
-        'zerodha': ZerodhaExecutor,
-        'binance': BinanceExecutor,
-        'upstox': UpstoxExecutor,
+        'mock': MockExecutor,
     }
+    
+    # Add broker executors if available
+    if ZerodhaExecutor:
+        EXECUTOR_CLASSES['zerodha'] = ZerodhaExecutor
+    if BinanceExecutor:
+        EXECUTOR_CLASSES['binance'] = BinanceExecutor
+    if UpstoxExecutor:
+        EXECUTOR_CLASSES['upstox'] = UpstoxExecutor
     
     @classmethod
     def create_executor(
@@ -27,7 +47,7 @@ class ExecutorFactory:
         Create an executor instance for the specified broker.
         
         Args:
-            broker: Broker name ('zerodha', 'binance', 'upstox')
+            broker: Broker name ('mock', 'zerodha', 'binance', 'upstox')
             client: Broker-specific client instance
             paper_trade: Whether to enable paper trading
             config: Broker-specific configuration
@@ -45,16 +65,20 @@ class ExecutorFactory:
             raise ValueError(f"Unsupported broker: {broker}. Supported brokers: {supported_brokers}")
         
         executor_class = cls.EXECUTOR_CLASSES[broker]
-        logger = get_logger(f"ExecutorFactory")
+        logger = get_logger("ExecutorFactory")
         
         logger.info(f"Creating {broker} executor - Paper Trade: {paper_trade}")
         
-        return executor_class(
-            client=client,
-            paper_trade=paper_trade,
-            logger=logger,
-            config=config or {}
-        )
+        # Handle MockExecutor which doesn't need client parameter
+        if broker == 'mock':
+            return executor_class(config=config or {})
+        else:
+            return executor_class(
+                client=client,
+                paper_trade=paper_trade,
+                logger=logger,
+                config=config or {}
+            )
     
     @classmethod
     def get_supported_brokers(cls) -> list:
