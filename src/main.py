@@ -10,11 +10,7 @@ from src.core.event_bus import EventBus
 # Import all components
 from src.core.candle.candle_maker import CandleMaker
 from src.core.order_manager import OrderManager
-from src.core.executors.mock_executioner import MockExecutioner
 from src.strategies.vwap_strategy import VwapStrategy
-
-# Import streamers based on system config
-from src.market.offline.offline_streamer import OfflineStreamer
 
 # Global shutdown event
 shutdown_event = Event()
@@ -34,6 +30,7 @@ def create_streamer(system_config: SystemConfigManager):
     
     if streamer_type == 'offline':
         logger.info("Creating offline streamer")
+        from src.core.streamer.offline_streamer import OfflineStreamer
         return OfflineStreamer(
             data_dir=config.get('data_dir', 'data'),
             playback_speed=config.get('playback_speed', 1.0)
@@ -41,13 +38,18 @@ def create_streamer(system_config: SystemConfigManager):
     elif streamer_type == 'zerodha':
         logger.info("Creating Zerodha streamer")
         # Import and create Zerodha streamer
-        from src.market.zerodha.zerodha_streamer import ZerodhaStreamer
+        from src.core.streamer.zerodha_streamer import ZerodhaStreamer
         return ZerodhaStreamer()
     elif streamer_type == 'binance':
         logger.info("Creating Binance streamer")
         # Import and create Binance streamer  
-        from src.market.binance.binance_streamer import BinanceStreamer
+        from src.core.streamer.binance_streamer import BinanceStreamer
         return BinanceStreamer()
+    elif streamer_type == 'upstox':
+        logger.info("Creating Upstox streamer")
+        # Import and create Upstox streamer
+        from src.core.streamer.upstox_streamer import UpstoxStreamer
+        return UpstoxStreamer()
     else:
         raise ValueError(f"Unknown streamer type: {streamer_type}")
 
@@ -60,17 +62,19 @@ def create_executioner(system_config: SystemConfigManager):
     
     if exec_type == 'mock':
         logger.info("Creating mock executioner")
+        from src.core.executors.mock_executor import MockExecutioner
+
         executioner = MockExecutioner()
         if 'slippage_factor' in config:
             executioner.set_slippage_factor(config['slippage_factor'])
         return executioner
     elif exec_type == 'kite':
         logger.info("Creating Kite executioner")
-        from src.core.executioner import KiteExecutioner
+        from src.core.executors import KiteExecutioner
         return KiteExecutioner()
     elif exec_type == 'paper':
         logger.info("Creating paper executioner")
-        from src.core.executioner import PaperExecutioner
+        from src.core.executors
         return PaperExecutioner()
     else:
         raise ValueError(f"Unknown executioner type: {exec_type}")
