@@ -1,17 +1,16 @@
 import time
 import random
 from typing import List, Dict, Any
-from datetime import datetime, timedelta
+from datetime import datetime
 import threading
 
 from .base_streamer import BaseStreamer
-from .events import QuoteEvent
 
 
 class OfflineStreamer(BaseStreamer):
     """
     Offline streamer that generates demo market data for testing purposes.
-    Inherits from BaseStreamer and follows the same event-driven pattern.
+    Uses the simplified BaseStreamer interface.
     """
     
     def __init__(self, symbols: List[str], base_price: float = 18500.0, tick_interval: float = 1.0):
@@ -26,10 +25,6 @@ class OfflineStreamer(BaseStreamer):
         """Setup demo data generation."""
         self._logger.info("Setting up offline demo data generation")
         self._stop_event.clear()
-        
-        # Initialize symbol mappings for demo
-        for symbol in self.symbols:
-            self.add_symbol_mapping(symbol, symbol)
     
     def _run_connection(self):
         """Run the demo data generation loop."""
@@ -39,38 +34,29 @@ class OfflineStreamer(BaseStreamer):
             try:
                 for symbol in self.symbols:
                     # Generate demo quote data
-                    raw_data = self._generate_demo_quote(symbol)
+                    quote_data = self._generate_demo_quote(symbol)
                     
-                    # Process through the base class method
-                    self._process_raw_quote(raw_data, symbol)
+                    # Use base class publish_quote method
+                    self.publish_quote(
+                        symbol=symbol,
+                        ltp=quote_data['ltp'],
+                        volume=quote_data['volume'],
+                        bid=quote_data['bid'],
+                        ask=quote_data['ask'],
+                        raw_data=quote_data
+                    )
                 
                 # Wait for next tick
                 time.sleep(self.tick_interval)
                 
             except Exception as e:
-                self._handle_connection_error(e)
+                self._logger.error(f"Error in demo data generation: {e}")
                 break
     
     def _cleanup_connection(self):
         """Clean up demo connection."""
         self._logger.info("Cleaning up offline streamer")
         self._stop_event.set()
-    
-    def _normalize_raw_data(self, raw_data: Dict[str, Any], symbol: str) -> QuoteEvent:
-        """Normalize demo data to QuoteEvent format."""
-        return QuoteEvent(
-            symbol=symbol,
-            ltp=raw_data['ltp'],
-            ltq=raw_data['ltq'],
-            ltt=raw_data['ltt'],
-            bid=raw_data['bid'],
-            ask=raw_data['ask'],
-            bid_qty=raw_data['bid_qty'],
-            ask_qty=raw_data['ask_qty'],
-            volume=raw_data['volume'],
-            timestamp=raw_data['timestamp'],
-            source=self.name
-        )
     
     def _generate_demo_quote(self, symbol: str) -> Dict[str, Any]:
         """Generate realistic demo market data."""
@@ -93,19 +79,33 @@ class OfflineStreamer(BaseStreamer):
         bid = new_price - spread / 2
         ask = new_price + spread / 2
         
-        # Generate volumes
-        ltq = random.randint(1, 100)
-        bid_qty = random.randint(50, 500)
-        ask_qty = random.randint(50, 500)
-        
-        self.volume_counter += ltq
+        # Generate volume
+        volume = random.randint(1, 100)
+        self.volume_counter += volume
         
         return {
             'ltp': round(new_price, 2),
-            'ltq': ltq,
-            'ltt': datetime.now(),
             'bid': round(bid, 2),
             'ask': round(ask, 2),
+            'volume': volume,
+            'timestamp': datetime.now()
+        }
+    
+    def set_base_price(self, price: float):
+        """Update base price for demo data."""
+        self.base_price = price
+        for symbol in self.symbols:
+            self.current_prices[symbol] = price
+        self._logger.info(f"Updated base price to {price}")
+    
+    def set_tick_interval(self, interval: float):
+        """Update tick generation interval."""
+        self.tick_interval = interval
+        self._logger.info(f"Updated tick interval to {interval}s")
+    
+    def get_current_prices(self) -> Dict[str, float]:
+        """Get current demo prices."""
+        return self.current_prices.copy()
             'bid_qty': bid_qty,
             'ask_qty': ask_qty,
             'volume': self.volume_counter,

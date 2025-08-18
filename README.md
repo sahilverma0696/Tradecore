@@ -1,141 +1,243 @@
-# VWAP Trading Bot
+# VWAP Algorithmic Trading System
 
-This project implements a VWAP (Volume Weighted Average Price) trading strategy for Indian markets (NSE F&O), using Zerodha Kite APIs for live and paper trading. The system is modular, event-driven, and designed for both live and paper trading.
+A production-grade event-driven algorithmic trading system implementing VWAP (Volume Weighted Average Price) strategies for Indian markets (NSE F&O) and cryptocurrency markets.
 
-## Features
+## 🏗️ Architecture Overview
 
-- VWAP-based entry and exit logic
-- Event-driven architecture with EventBus for decoupled communication
-- Real-time CLI dashboard for monitoring trades
-- Modular order management via `order_manager.py` and `order_object.py`
-- Hot-reloadable configuration
-- Logging and CSV/SQLite persistence
-- Comprehensive test suite
+This system is built on a **thread-managed event-driven architecture** with the following core components:
 
-## Project Structure
+### Thread Pool Management
+- **ThreadManager**: Centralized singleton managing all thread pools
+- **Segregated Pools**: Separate thread pools for different component types
+- **Async Support**: Event loops for components requiring async operations
+- **Configuration-Driven**: Thread pool sizes configurable via system_config.json
 
-```
-vwap/
-├── src/
-│   ├── main.py                # Main execution loop
-│   ├── logger_factory.py      # Logger utility
-│   ├── config_manager.py      # Loads and hot-reloads JSON config
-│   ├── core/
-│   │   ├── event_bus/         # Event-driven communication system
-│   │   ├── order_object.py    # Order object, encapsulates order state
-│   │   ├── order_manager.py   # Manages active orders, delegates logging
-│   │   ├── order_logger.py    # CSV logger for order entries/exits
-│   │   ├── candle_maker.py    # Aggregates tick data into candles, computes VWAP
-│   │   ├── executioner.py     # Places orders via KiteConnect or simulates
-│   ├── cli/
-│   │   ├── dashboard.py       # Real-time CLI dashboard
-│   │   ├── cli_main.py        # CLI entry point
-│   │   ├── demo_data.py       # Demo data for testing dashboard
-│   ├── market/
-│   │   ├── zerodha_streamer.py # Handles live tick streaming from KiteTicker
-│   │   ├── quote_database.py   # Persists tick data to SQLite
-│   ├── strategies/
-│   │   ├── vwap_strategy.py   # Main trading logic: entry/exit, position/risk management
-├── trading_config.json        # Main config file: symbols, credentials, instrument settings, execution params
-├── logs/                      # Log files and CSVs for orders/candles
-├── requirements.txt           # Python dependencies
-├── tests/
-│   ├── test_vwap_flow.py
-│   ├── test_order_manager.py
-│   ├── test_config_manager.py
-│   ├── test_candle_maker.py
-│   ├── test_event_bus.py      # Event bus tests
-```
+### Event-Driven Communication
+- **EventBus**: Singleton message broker for all inter-component communication
+- **Publisher/Subscriber Pattern**: Components inherit from mixins for event handling
+- **Typed Events**: Strongly typed event system for reliable communication
 
-## Setup
+### Factory Pattern Components
+- **Dynamic Creation**: Components created based on configuration files
+- **Multiple Brokers**: Support for Zerodha, Binance, and mock trading
+- **Extensible**: Easy to add new brokers and exchanges
 
-1. Clone the repository.
-2. Install dependencies:
-   ```bash
-   pip install -r requirements.txt
-   ```
-3. Configure your trading environment and data sources as needed in `trading_config.json`.
+## 🚀 Quick Start
 
-## Usage
-
-### Main Trading System
-To run the main trading bot from the `vwap` directory:
+### Prerequisites
 ```bash
+pip install -r requirements.txt
+```
+
+### Configuration
+1. Copy and configure trading settings:
+```bash
+cp trading_config.json.example trading_config.json
+# Edit with your API keys and trading parameters
+```
+
+2. Copy and configure system settings:
+```bash
+cp system_config.json.example system_config.json
+# Edit thread pool sizes and component types
+```
+
+### Running the System
+
+#### Live Trading Mode
+```bash
+# Configure system_config.json with:
+# "streamer": {"type": "zerodha"}
+# "executor": {"type": "zerodha"}
+
 python3 -m src.main
 ```
 
-### CLI Dashboard
-To run the real-time CLI dashboard:
+#### Paper Trading Mode
 ```bash
-# With curses interface (recommended)
-python3 -m src.cli.cli_main
+# Configure system_config.json with:
+# "streamer": {"type": "zerodha"}
+# "executor": {"type": "mock"}
 
-# Simple text interface (if curses not available)
-python3 -m src.cli.cli_main --no-curses
-
-# Standalone mode with demo data
-python3 -m src.cli.cli_main --standalone
+python3 -m src.main
 ```
 
-The dashboard shows:
-- Active positions with real-time P&L
-- Recent quotes with price changes
-- Entry/exit signals as they occur
-- System statistics (uptime, event counts, total P&L)
-
-### Dashboard Controls
-- Press 'q' to quit the curses dashboard
-- Press Ctrl+C to exit simple dashboard or demo mode
-
-## Running Tests
-
-To run all tests:
+#### Offline Testing Mode
 ```bash
-python3 -m unittest discover -s tests
+# Configure system_config.json with:
+# "streamer": {"type": "offline"}
+# "executor": {"type": "mock"}
+
+python3 -m src.main
 ```
 
-Or run a specific test file, for example:
+### Monitoring Dashboard
+Run the CLI dashboard in a separate terminal:
 ```bash
-python3 -m unittest tests/test_vwap_flow.py
-python3 -m unittest tests/test_event_bus.py
+python3 -m src.cli.cli_main          # Live dashboard
+python3 -m src.cli.cli_main --demo   # Demo mode
 ```
 
-## Architecture
+## 🧪 Testing
 
-The system uses an event-driven architecture with the following key components:
+### Running All Tests
+```bash
+# Run complete test suite
+python3 -m unittest discover -s tests -v
 
-- **EventBus**: Central communication hub using pub-sub pattern
-- **VWAPStrategy**: Contains all logic for when to enter or exit trades
-- **OrderManager**: Submits and manages orders
-- **OrderObject**: Represents an order with state tracking
-- **CandleMaker**: Aggregates ticks into candles and computes VWAP
-- **Executioner**: Handles order placement (live or paper)
-- **CLI Dashboard**: Real-time monitoring interface
+# Run with coverage
+python3 -m coverage run -m unittest discover -s tests
+python3 -m coverage report -m
+```
 
-### Event Flow
-1. **Market Data**: Streamers publish `QuoteReceived` events
-2. **Candle Generation**: CandleMaker publishes `CandleGenerated` events  
-3. **Strategy Signals**: VWAPStrategy publishes `EntrySignal`/`ExitSignal` events
-4. **Order Execution**: OrderManager subscribes to signals and executes trades
-5. **Monitoring**: CLI Dashboard subscribes to all events for real-time display
+### Thread Manager Tests
+```bash
+# Core functionality tests
+python3 -m unittest tests.test_thread_manager -v
 
-## Customization
+# Performance tests
+python3 -m unittest tests.test_thread_manager_performance -v
 
-- Modify `src/strategies/vwap_strategy.py` to adjust entry/exit logic
-- Extend `src/core/order_manager.py` for integration with different brokers
-- Add new event types in `src/core/event_bus/events.py` for custom functionality
+# Stress tests
+python3 -m unittest tests.test_thread_manager_stress -v
 
-## CLI Dashboard Features
+# Run specific test methods
+python3 -m unittest tests.test_thread_manager.TestThreadManager.test_singleton_pattern
+python3 -m unittest tests.test_thread_manager.TestThreadManager.test_thread_safe_singleton
+```
 
-The CLI dashboard provides real-time monitoring with:
+### Component Tests
+```bash
+# Event bus tests
+python3 -m unittest tests.test_event_bus -v
 
-- **Active Positions**: Shows current trades with live P&L calculations
-- **Recent Quotes**: Latest price data with change indicators
-- **Signal History**: Recent entry/exit signals with timestamps
-- **System Stats**: Uptime, event counts, and performance metrics
-- **Auto-refresh**: Updates every 1-2 seconds
-- **Color coding**: Green for profits, red for losses
+# Factory pattern tests  
+python3 -m unittest tests.test_executor_factory -v
+python3 -m unittest tests.test_streamer_factory -v
 
-## License
+# Integration tests
+python3 -m unittest tests.test_vwap_flow -v
+python3 -m unittest tests.test_candle_maker -v
+```
 
-MIT License
+### Performance Testing
+```bash
+# Thread manager performance under load
+python3 -m unittest tests.test_thread_manager_performance.TestThreadManagerPerformance.test_high_volume_task_submission -v
+
+# Concurrent pool usage
+python3 -m unittest tests.test_thread_manager_performance.TestThreadManagerPerformance.test_concurrent_pool_usage -v
+
+# Memory usage monitoring
+python3 -m unittest tests.test_thread_manager_performance.TestThreadManagerPerformance.test_memory_usage_under_load -v
+```
+
+### Stress Testing
+```bash
+# Exception handling under load
+python3 -m unittest tests.test_thread_manager_stress.TestThreadManagerStress.test_exception_handling_stress -v
+
+# Thread pool saturation
+python3 -m unittest tests.test_thread_manager_stress.TestThreadManagerStress.test_thread_pool_saturation -v
+
+# Mixed chaotic workload
+python3 -m unittest tests.test_thread_manager_stress.TestThreadManagerStress.test_mixed_workload_chaos -v
+```
+
+## 📋 Test Coverage Areas
+
+### ThreadManager Tests
+- **Singleton Pattern**: Thread-safe singleton creation and access
+- **Pool Management**: Thread pool initialization and configuration
+- **Task Submission**: Sync and async task handling
+- **Error Handling**: Exception propagation and recovery
+- **Performance**: High-volume task processing
+- **Stress Testing**: Edge cases and failure scenarios
+- **Memory Management**: Memory usage under sustained load
+
+### Integration Tests
+- **Event Flow**: End-to-end event propagation
+- **Component Wiring**: Factory-created component interaction
+- **Configuration**: Dynamic component creation based on config
+- **Graceful Shutdown**: Clean system termination
+
+## 🔧 Configuration
+
+### Thread Pool Configuration (system_config.json)
+```json
+{
+  "threading": {
+    "event_bus_workers": 2,
+    "streamer_workers": 4,
+    "strategy_workers": 2,
+    "executor_workers": 2,
+    "system_workers": 2
+  },
+  "streamer": {
+    "type": "offline",
+    "async_enabled": true
+  },
+  "executor": {
+    "type": "mock"
+  }
+}
+```
+
+### Trading Configuration (trading_config.json)
+```json
+{
+  "symbols": ["260105"],
+  "name_symbol": "NIFTY_50",
+  "paper_trade": true,
+  "default_quantity": 75,
+  "exit_steps": [[0.02, 0.3], [0.04, 0.3]]
+}
+```
+
+## 📊 Performance Metrics
+
+The system supports comprehensive performance monitoring:
+
+- **Thread Pool Statistics**: Active/completed/failed task counts
+- **Event Bus Metrics**: Event throughput and processing latency
+- **Memory Usage**: Real-time memory consumption tracking
+- **Latency Distribution**: Task execution timing analysis
+
+View metrics via the CLI dashboard or programmatically through the ThreadManager API.
+
+## 🔄 Development Workflow
+
+1. **Make Changes**: Edit components following the factory pattern
+2. **Run Unit Tests**: Test individual components in isolation
+3. **Run Integration Tests**: Test component interactions
+4. **Run Performance Tests**: Ensure no performance regressions
+5. **Run Stress Tests**: Verify system stability under load
+
+## 📁 Project Structure
+
+```
+src/
+├── main.py                     # Entry point with thread pool initialization
+├── core/
+│   ├── thread_manager.py      # Centralized thread pool management
+│   ├── event_bus/             # Event-driven communication
+│   ├── executors/             # Order execution layer
+│   └── streamer/              # Market data streaming
+├── strategies/                # Trading strategies
+└── cli/                      # Command-line interface
+
+tests/
+├── test_thread_manager*.py    # Thread manager test suite
+├── test_event_bus.py         # Event system tests
+└── test_*_factory.py         # Factory pattern tests
+```
+
+## 🚨 Important Notes
+
+- **Thread Safety**: All components are designed for concurrent access
+- **Event-Driven**: Use EventBus for all inter-component communication
+- **Factory Pattern**: Always use factories for component creation
+- **Configuration-Driven**: System behavior controlled via JSON configs
+- **Testing**: Comprehensive test coverage ensures system reliability
+
+For detailed architectural information, see [LLM_README.md](LLM_README.md).

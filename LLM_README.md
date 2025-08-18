@@ -18,478 +18,558 @@ This system follows strict architectural patterns. Violating these patterns will
 
 ## Project Overview
 
-This is a **production-grade algorithmic trading system** implementing VWAP (Volume Weighted Average Price) strategies for Indian markets (NSE F&O) using multiple broker APIs (Zerodha, Binance, Upstox). The system is built on an **event-driven architecture** with strict separation of concerns and factory patterns for extensibility.
+This is a **production-grade algorithmic trading system** implementing VWAP (Volume Weighted Average Price) strategies for Indian markets (NSE F&O) using multiple broker APIs (Zerodha, Binance, Upstox). The system is built on a **thread-managed event-driven architecture** with strict separation of concerns and factory patterns for extensibility.
 
 ### Core Philosophy
+- **Thread-Managed**: Centralized thread pool management for all concurrent operations
 - **Event-Driven**: All communication via EventBus singleton
 - **Decoupled Components**: No direct dependencies between modules
 - **Publisher-Subscriber Pattern**: Components publish/subscribe to typed events
 - **Factory Pattern**: Dynamic component creation based on configuration
-- **Thread-Safe**: Concurrent access handled properly
-- **Testable**: Each component tested in isolation
+- **Thread-Safe**: Concurrent access handled properly through ThreadManager
+- **Testable**: Each component tested in isolation with comprehensive thread safety tests
 
 ---
 
 ## 🏗️ SYSTEM ARCHITECTURE
 
-### Event Bus Foundation
+### Thread Management Foundation
 
-The **EventBus** is the backbone of the system. ALL components communicate through typed events.
+The **ThreadManager** is the concurrency backbone of the system. ALL threading operations go through centralized thread pools.
 
 ```
 ┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
-│   Streamers     │───▶│   EventBus      │◀───│  CandleMaker    │
-│  (Publishers)   │    │   (Singleton)   │    │ (Pub/Sub)       │
+│   ThreadManager │───▶│  Thread Pools   │◀───│  All Components │
+│   (Singleton)   │    │   (Segregated)  │    │  (Submit Tasks) │
 └─────────────────┘    └─────────────────┘    └─────────────────┘
-                              │
-                              ▼
-┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
-│   Strategies    │◀───│   All Events    │───▶│ Order Manager   │
-│  (Subscribers)  │    │   Flow Here     │    │ (Subscriber)    │
-└─────────────────┘    └─────────────────┘    └─────────────────┘
+         │                       │
+         ▼                       ▼
+┌─────────────────┐    ┌─────────────────┐
+│   EventBus      │    │  Async Loops    │
+│   Pool (2)      │    │  (Streamer/Bus) │
+└─────────────────┘    └─────────────────┘
+         │                       │
+         ▼                       ▼
+┌─────────────────┐    ┌─────────────────┐
+│   Strategy      │    │   Executor      │
+│   Pool (2)      │    │   Pool (2)      │
+└─────────────────┘    └─────────────────┘
 ```
 
-### Factory Pattern Integration
+### Thread Pool Architecture
 
 ```
-SystemConfigManager ──┐
-                     ├──► StreamerFactory ──► BaseStreamer
-                     │                          ├── ZerodhaStreamer
-                     │                          ├── BinanceStreamer
-                     │                          └── OfflineStreamer
-                     │
-                     └──► ExecutorFactory ──► BaseExecutor
-                                               ├── ZerodhaExecutor
-                                               ├── MockExecutor
-                                               └── BinanceExecutor
+ThreadManager (Singleton)
+├── EVENT_BUS Pool (2 workers) + Async Loop
+│   └── Handles event publishing/routing
+├── STREAMER Pool (4 workers) + Async Loop  
+│   └── Market data collection and processing
+├── STRATEGY Pool (2 workers)
+│   └── Trading signal generation
+├── EXECUTOR Pool (2 workers)
+│   └── Order placement and management
+└── SYSTEM Pool (2 workers)
+    └── Health checks, logging, monitoring
+```
+
+### Event Bus Integration with Thread Pools
+
+```
+BaseStreamer ──┐
+              ├──► ThreadManager.submit_task(STREAMER, quote_processing)
+              │       │
+              │       ▼
+              │   ┌─────────────────┐
+              └──►│   EventBus      │──┐
+                  │   (EVENT_BUS    │  │
+                  │    Thread Pool) │  │
+                  └─────────────────┘  │
+                           │           │
+                           ▼           ▼
+                  VwapStrategy     OrderManager
+                  (STRATEGY Pool)  (EXECUTOR Pool)
 ```
 
 ---
 
-## 📁 DIRECTORY STRUCTURE (UPDATED)
+## 📁 DIRECTORY STRUCTURE (WITH THREAD MANAGEMENT)
 
 ```
 src/
-├── main.py                          # 🎯 ENTRY POINT - Factory-based wiring
+├── main.py                          # 🎯 ENTRY POINT - ThreadManager initialization
 ├── config_manager.py                # Hot-reload trading config
 ├── system_config_manager.py         # System-wide configuration
 ├── logger_factory.py               # Centralized logging
 │
 ├── core/
+│   ├── thread_manager.py            # 🚨 THREAD POOL MANAGEMENT (Singleton)
+│   │                               # - Centralized thread pool creation
+│   │                               # - Async loop management
+│   │                               # - Task submission and monitoring
+│   │                               # - Graceful shutdown handling
+│   │
 │   ├── event_bus/                   # 🚨 CORE ARCHITECTURE
-│   │   ├── __init__.py             # Event exports (UPDATE when adding events)
-│   │   ├── event_bus.py            # EventBus singleton (NEVER modify lightly)
+│   │   ├── __init__.py             # Event exports
+│   │   ├── event_bus.py            # EventBus singleton (Uses EVENT_BUS pool)
 │   │   ├── events.py               # All event definitions
 │   │   └── mixins.py               # Publisher/Subscriber mixins
 │   │
-│   ├── executors/                   # 🎯 EXECUTION LAYER (Factory Pattern)
-│   │   ├── __init__.py             # Executor exports
-│   │   ├── base_executor.py        # Abstract base for all executors
+│   ├── executors/                   # 🎯 EXECUTION LAYER (Uses EXECUTOR pool)
+│   │   ├── base_executor.py        # Abstract base (Thread-safe)
 │   │   ├── executor_factory.py     # Factory for creating executors
 │   │   ├── mock_executor.py        # Paper trading executor
-│   │   ├── zerodha_executor.py     # Zerodha Kite executor
-│   │   └── binance_executor.py     # Binance executor
+│   │   └── zerodha_executor.py     # Zerodha Kite executor
 │   │
-│   ├── streamer/                    # 🎯 STREAMING LAYER (Template Pattern)
-│   │   ├── __init__.py             # Streamer exports
-│   │   ├── base_streamer.py        # Abstract base for all streamers
+│   ├── streamer/                    # 🎯 STREAMING LAYER (Uses STREAMER pool)
+│   │   ├── base_streamer.py        # Abstract base with ThreadManager integration
 │   │   ├── quote_normalizer.py     # Standardizes quote formats
 │   │   ├── events.py               # Streamer-specific events
 │   │   └── offline_streamer.py     # Mock data generator
 │   │
-│   ├── candle_maker.py             # 🎯 OHLCV + VWAP candle generation
-│   ├── order_manager.py            # Manages active orders
-│   ├── order_object.py             # Order state encapsulation
-│   ├── order_logger.py             # CSV order logging
-│   └── executioner.py              # Legacy executor wrapper
-│
-├── market/                          # 🎯 BROKER-SPECIFIC IMPLEMENTATIONS
-│   ├── zerodha/
-│   │   ├── zerodha_streamer.py     # Live Kite tick streaming
-│   │   └── quote_database.py       # SQLite tick persistence
-│   └── binance/
-│       └── binance_streamer.py     # Crypto streaming
+│   ├── candle_maker.py             # 🎯 OHLCV + VWAP (Uses EVENT_BUS pool)
+│   ├── order_manager.py            # Order management (Uses EXECUTOR pool)
+│   └── order_object.py             # Order state encapsulation
 │
 ├── strategies/
-│   ├── vwap_strategy.py            # 🎯 MAIN TRADING LOGIC
-│   └── exit_manager.py             # Exit condition handling
+│   ├── vwap_strategy.py            # 🎯 TRADING LOGIC (Uses STRATEGY pool)
+│   └── exit_manager.py             # Exit conditions (Uses STRATEGY pool)
 │
-└── cli/
-    ├── dashboard.py                # Real-time monitoring
-    ├── cli_main.py                 # CLI entry point
-    └── demo_data.py                # Testing data generator
+└── market/                          # 🎯 BROKER-SPECIFIC IMPLEMENTATIONS
+    ├── zerodha/
+    │   └── zerodha_streamer.py     # Live Kite streaming (Uses STREAMER pool)
+    └── binance/
+        └── binance_streamer.py     # Crypto streaming (Uses STREAMER pool)
 
 tests/
-├── test_event_bus.py               # 🧪 EventBus comprehensive tests
-├── test_candle_maker.py            # CandleMaker event integration
-├── test_vwap_flow.py               # End-to-end workflow tests
-├── test_executors.py               # Executor factory tests
-└── test_streamers.py               # Streamer factory tests
+├── test_thread_manager.py          # 🧪 Core ThreadManager tests
+├── test_thread_manager_performance.py # Performance under load
+├── test_thread_manager_stress.py   # Stress and edge cases
+├── test_event_bus.py               # EventBus with thread pools
+└── test_integration.py             # End-to-end threading tests
 
+system_config.json                  # 🔧 SYSTEM + THREAD CONFIGURATION
 trading_config.json                 # 🔧 TRADING CONFIGURATION
-system_config.json                  # 🔧 SYSTEM CONFIGURATION
 ```
 
 ---
 
-## 🔄 EVENT FLOW ARCHITECTURE
+## 🔄 THREAD-MANAGED EVENT FLOW
 
-### 1. **Market Data Flow**
+### 1. **Market Data Flow with Thread Pools**
 ```
-StreamerFactory → BaseStreamer Implementation (Zerodha/Binance/Offline)
-    │ publishes QuoteEvent/QuoteReceived
+BaseStreamer (STREAMER Pool)
+    │ submit_task(STREAMER, quote_processing)
+    │ submit_task(EVENT_BUS, event_publishing)
     ▼
-EventBus
-    │ routes to subscribers
+ThreadManager → EventBus (EVENT_BUS Pool)
+    │ routes events through thread pool
     ▼  
-CandleMaker (Publisher + Subscriber)
-    │ subscribes to QuoteReceived
-    │ aggregates 5-min candles with VWAP
+CandleMaker (EVENT_BUS Pool)
+    │ submit_task(EVENT_BUS, candle_generation)
     │ publishes CandleGenerated
     ▼
-VwapStrategy (Subscriber)
-    │ subscribes to CandleGenerated
-    │ analyzes VWAP crossovers
+VwapStrategy (STRATEGY Pool)
+    │ submit_task(STRATEGY, signal_analysis)
 ```
 
-### 2. **Trading Signal Flow**
+### 2. **Trading Signal Flow with Thread Pools**
 ```
-VwapStrategy (Publisher)
-    │ publishes EntrySignal/ExitSignal
+VwapStrategy (STRATEGY Pool)
+    │ submit_task(EVENT_BUS, publish_entry_signal)
     ▼
-EventBus
-    │ routes to order management
+EventBus (EVENT_BUS Pool)
+    │ routes to subscribers through thread pool
     ▼
-OrderManager (Subscriber)
-    │ subscribes to Entry/Exit signals
-    │ manages order lifecycle
-    │ calls ExecutorFactory → BaseExecutor implementation
+OrderManager (EXECUTOR Pool)
+    │ submit_task(EXECUTOR, order_processing)
+    │ calls ExecutorFactory → BaseExecutor
 ```
 
-### 3. **Configuration-Driven Component Creation**
+### 3. **Thread Pool Task Submission Pattern**
 ```
-SystemConfigManager
-    │ reads system_config.json
-    ▼
-Main.py
-    │ creates components based on config
-    ├── StreamerFactory.create_streamer(type='zerodha'|'binance'|'offline')
-    └── ExecutorFactory.create_executor(type='zerodha'|'mock'|'binance')
+Component (Any Pool)
+    │
+    ├── For CPU-bound tasks:
+    │   ThreadManager.submit_task(APPROPRIATE_POOL, sync_function)
+    │
+    ├── For I/O-bound tasks:
+    │   ThreadManager.submit_async_task(ASYNC_POOL, async_coroutine)
+    │
+    └── For event publishing:
+        ThreadManager.submit_task(EVENT_BUS, publish_event_function)
 ```
 
 ---
 
-## 🚨 CRITICAL IMPLEMENTATION RULES
+## 🚨 CRITICAL IMPLEMENTATION RULES (UPDATED)
 
-### Rule 1: Factory Pattern Usage
+### Rule 1: Thread Pool Usage (NEW)
 ```python
-# ✅ CORRECT - Use factories for component creation
-from src.core.executors.executor_factory import ExecutorFactory
-from src.system_config_manager import SystemConfigManager
+# ✅ CORRECT - Use ThreadManager for all threading
+from src.core.thread_manager import ThreadManager, ThreadPoolType
 
-system_config = SystemConfigManager()
-executor_config = system_config.get_executioner_config()
-executor = ExecutorFactory.create_executor(
-    broker=executor_config['type'],
-    config=executor_config['config']
+thread_manager = ThreadManager()
+
+# Submit CPU-bound task
+future = thread_manager.submit_task(
+    ThreadPoolType.STRATEGY,
+    self.calculate_signals,
+    market_data
 )
 
-# ❌ WRONG - Direct instantiation
-from src.core.executors.mock_executor import MockExecutor
-executor = MockExecutor()  # Bypasses factory pattern
+# Submit async I/O task
+async_future = thread_manager.submit_async_task(
+    ThreadPoolType.STREAMER,
+    self.fetch_market_data_async()
+)
+
+# ❌ WRONG - Direct thread creation
+import threading
+thread = threading.Thread(target=some_function)  # DON'T DO THIS
+thread.start()
 ```
 
-### Rule 2: Correct Directory Structure
+### Rule 2: Component Thread Pool Assignment
 ```python
-# ✅ CORRECT - Current structure
-from src.core.executors.base_executor import BaseExecutor
-from src.core.streamer.base_streamer import BaseStreamer
-from src.core.event_bus import EventBus, QuoteReceived, CandleGenerated
+# ✅ CORRECT - Use appropriate pool for component type
+class StreamerComponent(BaseStreamer):
+    def process_quotes(self):
+        # Use STREAMER pool for market data processing
+        self._thread_manager.submit_task(
+            ThreadPoolType.STREAMER,
+            self._process_quote_batch
+        )
 
-# ❌ WRONG - Old or incorrect paths
-from src.core.executioner import BaseExecutor  # Old location
-from src.core.streamers.base_streamer import BaseStreamer  # Wrong directory
+class StrategyComponent(Publisher):
+    def generate_signals(self):
+        # Use STRATEGY pool for signal generation
+        thread_manager = ThreadManager()
+        thread_manager.submit_task(
+            ThreadPoolType.STRATEGY,
+            self._analyze_market_conditions
+        )
+
+# ❌ WRONG - Using wrong pool type
+class StrategyComponent:
+    def generate_signals(self):
+        # Wrong pool for strategy work
+        thread_manager.submit_task(ThreadPoolType.EXECUTOR, strategy_work)
 ```
 
-### Rule 3: Configuration Management
+### Rule 3: Event Publishing Through Thread Pools
 ```python
-# ✅ CORRECT - Use SystemConfigManager for system settings
-from src.system_config_manager import SystemConfigManager
-from src.config_manager import ConfigManager
+# ✅ CORRECT - Publish events through EVENT_BUS pool
+class MarketDataProcessor(Publisher):
+    def publish_quote(self, quote_data):
+        def _publish_task():
+            event = QuoteReceived(...)
+            self.publish_event(event)
+        
+        thread_manager = ThreadManager()
+        thread_manager.submit_task(ThreadPoolType.EVENT_BUS, _publish_task)
 
-system_config = SystemConfigManager()  # system_config.json
-trading_config = ConfigManager()       # trading_config.json
-
-# Get streamer type from system config
-streamer_type = system_config.get('streamer.type', 'offline')
-
-# ❌ WRONG - Hardcoded configurations
-streamer_type = 'zerodha'  # Should come from config
+# ❌ WRONG - Direct event publishing without thread pool
+class BadProcessor(Publisher):
+    def publish_quote(self, quote_data):
+        event = QuoteReceived(...)
+        self.publish_event(event)  # Blocks calling thread
 ```
 
-### Rule 4: Abstract Base Class Implementation
+### Rule 4: Async Operations in Thread Pools
 ```python
-# ✅ CORRECT - Proper inheritance from base classes
-class CustomExecutor(BaseExecutor):
-    def __init__(self, config: Dict[str, Any] = None):
-        super().__init__(config=config)  # Initialize base class
+# ✅ CORRECT - Use async loops for I/O-bound operations
+class AsyncStreamer(BaseStreamer):
+    async def stream_data_async(self):
+        while self.is_running:
+            data = await self.fetch_market_data()
+            await self.process_data_async(data)
     
-    def _place_order_impl(self, symbol, side, quantity, order_type):
-        # Implementation required
-        pass
+    def start_streaming(self):
+        thread_manager = ThreadManager()
+        future = thread_manager.submit_async_task(
+            ThreadPoolType.STREAMER,
+            self.stream_data_async()
+        )
 
-# ❌ WRONG - Missing base class methods
-class BadExecutor(BaseExecutor):
-    def __init__(self):
-        pass  # Missing super().__init__() and required methods
+# ❌ WRONG - Blocking operations in async context
+class BadAsyncStreamer:
+    async def stream_data_async(self):
+        data = requests.get(url)  # Blocking call in async context
 ```
 
 ---
 
-## 🧪 TESTING ARCHITECTURE
+## 🧪 TESTING ARCHITECTURE (THREAD-FOCUSED)
 
-### Test Structure (Updated)
+### Thread Manager Test Categories
 ```
-tests/
-├── test_event_bus.py          # Core EventBus functionality
-├── test_executors.py          # ExecutorFactory and implementations
-│   ├── Factory pattern tests
-│   ├── Mock executor tests
-│   ├── Configuration-driven creation
-│   └── Error handling
-├── test_streamers.py          # StreamerFactory and implementations
-│   ├── BaseStreamer template pattern
-│   ├── Offline streamer tests
-│   └── Quote normalization
-├── test_candle_maker.py       # CandleMaker with EventBus
-└── test_vwap_flow.py          # End-to-end workflow
+tests/test_thread_manager.py
+├── Singleton pattern validation
+├── Thread-safe singleton creation
+├── Pool initialization and configuration
+├── Task submission (sync/async)
+├── Error handling and propagation
+├── Statistics and monitoring
+└── Graceful shutdown
+
+tests/test_thread_manager_performance.py  
+├── High-volume task submission
+├── Concurrent pool usage
+├── Async task performance
+├── Memory usage under load
+└── Latency distribution analysis
+
+tests/test_thread_manager_stress.py
+├── Exception handling under load
+├── Thread pool saturation
+├── Rapid start/stop cycles
+├── Mixed chaotic workloads
+└── Shutdown with pending tasks
 ```
 
-### Factory Test Patterns
+### Thread-Safe Component Testing Pattern
 ```python
-# Factory test pattern
-def test_executor_factory(self):
-    # Test factory creates correct type
-    mock_executor = ExecutorFactory.create_executor('mock')
-    self.assertIsInstance(mock_executor, MockExecutor)
+# Thread-safe component test pattern
+class TestThreadSafeComponent(unittest.TestCase):
+    def setUp(self):
+        ThreadManager._instance = None  # Reset singleton
+        self.thread_manager = ThreadManager()
+        self.thread_manager.initialize_pools()
     
-    # Test configuration passing
-    config = {'slippage_factor': 0.01}
-    executor = ExecutorFactory.create_executor('mock', config=config)
-    self.assertEqual(executor.slippage_factor, 0.01)
+    def tearDown(self):
+        self.thread_manager.shutdown(wait=True, timeout=5.0)
+        ThreadManager._instance = None
     
-    # Test invalid broker handling
-    with self.assertRaises(ValueError):
-        ExecutorFactory.create_executor('invalid_broker')
+    def test_concurrent_operations(self):
+        # Test component under concurrent access
+        futures = []
+        for i in range(10):
+            future = self.thread_manager.submit_task(
+                ThreadPoolType.STRATEGY,
+                component.process_data,
+                test_data[i]
+            )
+            futures.append(future)
+        
+        # Verify all tasks complete successfully
+        results = [f.result(timeout=10.0) for f in futures]
+        self.assertEqual(len(results), 10)
 ```
 
 ---
 
-## 🔧 CONFIGURATION SYSTEM (UPDATED)
+## 🔧 CONFIGURATION SYSTEM (THREAD-ENHANCED)
 
-### system_config.json Structure (System-wide settings)
+### system_config.json Structure (Thread Configuration)
 ```json
 {
+  "threading": {
+    "event_bus_workers": 2,
+    "streamer_workers": 4,
+    "strategy_workers": 2,
+    "executor_workers": 2,
+    "system_workers": 2,
+    "max_worker_threads": 8,
+    "thread_timeout_seconds": 60,
+    "daemon_threads": true
+  },
   "streamer": {
     "type": "offline",
+    "async_enabled": true,
     "config": {
       "offline": {
         "tick_interval": 1.0,
-        "base_price": 18500.0
-      },
-      "zerodha": {
-        "reconnect_attempts": 5
+        "async_mode": true
       }
     }
   },
-  "executor": {
-    "type": "mock",
-    "config": {
-      "mock": {
-        "slippage_factor": 0.0001,
-        "initial_cash": 100000.0
-      }
-    }
-  }
-}
-```
-
-### trading_config.json Structure (Trading-specific settings)
-```json
-{
-  "symbols": ["260105"],
-  "name_symbol": "NIFTY_50",
-  "paper_trade": true,
-  "default_quantity": 75,
-  "exit_steps": [[0.02, 0.3], [0.04, 0.3]],
-  "execution": {
-    "delta_sell": 0.02,
-    "max_retries": 3
+  "performance": {
+    "enable_profiling": false,
+    "memory_monitoring": true,
+    "gc_collection_interval": 600
   }
 }
 ```
 
 ---
 
-## 🎯 EXTENDING THE SYSTEM
+## 🎯 RUNNING TESTS (COMPREHENSIVE)
 
-### Adding New Executors
-1. **Create executor class**
-```python
-class NewBrokerExecutor(BaseExecutor):
-    def _place_order_impl(self, symbol, side, quantity, order_type):
-        # Broker-specific implementation
-        pass
+### Core Thread Manager Tests
+```bash
+# Basic functionality
+python3 -m unittest tests.test_thread_manager -v
+
+# Performance under load
+python3 -m unittest tests.test_thread_manager_performance -v
+
+# Stress and edge cases  
+python3 -m unittest tests.test_thread_manager_stress -v
+
+# Specific test methods
+python3 -m unittest tests.test_thread_manager.TestThreadManager.test_singleton_pattern
+python3 -m unittest tests.test_thread_manager.TestThreadManager.test_concurrent_task_submission
 ```
 
-2. **Register with factory**
-```python
-ExecutorFactory.register_executor('new_broker', NewBrokerExecutor)
+### Performance Testing
+```bash
+# High-volume task processing
+python3 -m unittest tests.test_thread_manager_performance.TestThreadManagerPerformance.test_high_volume_task_submission -v
+
+# Memory usage monitoring
+python3 -m unittest tests.test_thread_manager_performance.TestThreadManagerPerformance.test_memory_usage_under_load -v
+
+# Latency distribution
+python3 -m unittest tests.test_thread_manager_performance.TestThreadManagerPerformance.test_latency_distribution -v
 ```
 
-3. **Update system_config.json**
-```json
-{
-  "executor": {
-    "type": "new_broker",
-    "config": {
-      "new_broker": {
-        "api_key": "xxx",
-        "secret": "yyy"
-      }
-    }
-  }
-}
+### Stress Testing
+```bash
+# Exception handling under load
+python3 -m unittest tests.test_thread_manager_stress.TestThreadManagerStress.test_exception_handling_stress -v
+
+# Thread pool saturation
+python3 -m unittest tests.test_thread_manager_stress.TestThreadManagerStress.test_thread_pool_saturation -v
+
+# Chaos testing
+python3 -m unittest tests.test_thread_manager_stress.TestThreadManagerStress.test_mixed_workload_chaos -v
 ```
 
-### Adding New Streamers
-1. **Create streamer class**
-```python
-class NewExchangeStreamer(BaseStreamer):
-    def _setup_connection(self):
-        # Exchange-specific setup
-        pass
-        
-    def _normalize_raw_data(self, raw_data, symbol):
-        # Exchange-specific normalization
-        pass
-```
+### Integration Testing
+```bash
+# Full system with thread pools
+python3 -m unittest tests.test_integration_threading -v
 
-2. **Update directory structure**
-```
-src/market/new_exchange/
-├── new_exchange_streamer.py
-└── market_data_handler.py
+# Event bus with thread pools
+python3 -m unittest tests.test_event_bus_threading -v
 ```
 
 ---
 
-## ⚠️ COMMON PITFALLS FOR LLM AGENTS
+## 🎯 EXTENDING THE SYSTEM (THREAD-AWARE)
 
-### 1. **Wrong Directory Structure**
+### Adding Thread-Safe Components
+1. **Inherit from appropriate base class**
 ```python
-# ❌ WRONG - Incorrect paths
-from src.core.executors.executor_factory import ExecutorFactory  # Correct
-from src.core.executor_factory import ExecutorFactory            # Wrong
-
-# ✅ CORRECT - Follow directory structure
-from src.core.executors.executor_factory import ExecutorFactory
-from src.core.streamer.base_streamer import BaseStreamer
-```
-
-### 2. **Bypassing Factory Pattern**
-```python
-# ❌ WRONG - Direct instantiation
-from src.core.executors.mock_executor import MockExecutor
-executor = MockExecutor()
-
-# ✅ CORRECT - Use factory
-from src.core.executors.executor_factory import ExecutorFactory
-executor = ExecutorFactory.create_executor('mock', config=config)
-```
-
-### 3. **Configuration Confusion**
-```python
-# ❌ WRONG - Mixing configuration types
-system_config = ConfigManager()        # Should be SystemConfigManager
-trading_config = SystemConfigManager() # Should be ConfigManager
-
-# ✅ CORRECT - Use appropriate config managers
-system_config = SystemConfigManager()   # For system settings
-trading_config = ConfigManager()        # For trading settings
-```
-
-### 4. **Missing Abstract Method Implementation**
-```python
-# ❌ WRONG - Incomplete base class implementation
-class CustomExecutor(BaseExecutor):
+class NewComponent(Publisher, Subscriber):
     def __init__(self):
         super().__init__()
-    # Missing required abstract methods
+        self.thread_manager = ThreadManager()
+```
 
-# ✅ CORRECT - Implement all abstract methods
-class CustomExecutor(BaseExecutor):
-    def _place_order_impl(self, symbol, side, quantity, order_type):
-        pass
-    
-    def _get_order_status_impl(self, order_id):
-        pass
-    
-    # ... other required methods
+2. **Use appropriate thread pool**
+```python
+def process_data(self, data):
+    # Submit to appropriate pool based on component type
+    future = self.thread_manager.submit_task(
+        ThreadPoolType.STRATEGY,  # or STREAMER, EXECUTOR, etc.
+        self._process_data_impl,
+        data
+    )
+    return future.result(timeout=30.0)
+```
+
+3. **Handle async operations properly**
+```python
+async def async_operation(self):
+    # Use async pools for I/O-bound work
+    future = self.thread_manager.submit_async_task(
+        ThreadPoolType.STREAMER,
+        self._fetch_data_async()
+    )
+    return await future
 ```
 
 ---
 
-## 📋 SYSTEM STATUS & CAPABILITIES (UPDATED)
+## ⚠️ COMMON PITFALLS FOR LLM AGENTS (THREAD-FOCUSED)
+
+### 1. **Direct Threading (CRITICAL ERROR)**
+```python
+# ❌ WRONG - Direct thread creation
+import threading
+def start_background_work():
+    thread = threading.Thread(target=work_function)
+    thread.start()
+
+# ✅ CORRECT - Use ThreadManager
+def start_background_work():
+    thread_manager = ThreadManager()
+    future = thread_manager.submit_task(ThreadPoolType.SYSTEM, work_function)
+```
+
+### 2. **Wrong Thread Pool Selection**
+```python
+# ❌ WRONG - Using executor pool for strategy work
+thread_manager.submit_task(ThreadPoolType.EXECUTOR, strategy_calculation)
+
+# ✅ CORRECT - Use strategy pool for strategy work  
+thread_manager.submit_task(ThreadPoolType.STRATEGY, strategy_calculation)
+```
+
+### 3. **Blocking Async Operations**
+```python
+# ❌ WRONG - Blocking call in async context
+async def async_streamer():
+    data = requests.get(url)  # Blocks event loop
+
+# ✅ CORRECT - Use async HTTP client
+async def async_streamer():
+    async with aiohttp.ClientSession() as session:
+        data = await session.get(url)
+```
+
+### 4. **Missing Thread Pool Initialization**
+```python
+# ❌ WRONG - Using ThreadManager without initialization
+thread_manager = ThreadManager()
+thread_manager.submit_task(ThreadPoolType.SYSTEM, task)  # Will fail
+
+# ✅ CORRECT - Initialize pools first
+thread_manager = ThreadManager()
+thread_manager.initialize_pools()
+thread_manager.submit_task(ThreadPoolType.SYSTEM, task)
+```
+
+### 5. **Forgetting Graceful Shutdown**
+```python
+# ❌ WRONG - Abrupt termination
+sys.exit()
+
+# ✅ CORRECT - Graceful shutdown
+thread_manager = ThreadManager()
+thread_manager.shutdown(wait=True, timeout=30.0)
+```
+
+---
+
+## 📋 SYSTEM STATUS & CAPABILITIES (THREAD-ENHANCED)
 
 ### ✅ Implemented & Tested
-- Event-driven architecture with EventBus singleton
-- Factory pattern for executors and streamers
-- Configuration-driven component creation
-- Abstract base classes with template method pattern
-- Mock/offline components for testing
-- System and trading configuration separation
-- Publisher/Subscriber mixins for components
+- **Thread pool management with comprehensive testing**
+- **Thread-safe singleton pattern for ThreadManager**
+- **Segregated thread pools for different component types**
+- **Async loop integration for I/O-bound operations**
+- **Performance monitoring and statistics**
+- **Stress testing under extreme conditions**
+- **Graceful shutdown with timeout handling**
+- **Memory usage monitoring and leak detection**
 
-### 🔄 Current Component Types
-**Executors:**
-- MockExecutor (paper trading)
-- ZerodhaExecutor (Kite API)
-- BinanceExecutor (Binance API)
+### 🔄 Thread Pool Types
+- **EVENT_BUS**: Event routing and publishing (2 workers + async loop)
+- **STREAMER**: Market data processing (4 workers + async loop)
+- **STRATEGY**: Signal generation (2 workers)
+- **EXECUTOR**: Order placement (2 workers)
+- **SYSTEM**: Health checks and monitoring (2 workers)
 
-**Streamers:**
-- OfflineStreamer (demo data)
-- ZerodhaStreamer (live Kite data)
-- BinanceStreamer (live crypto data)
-
-### 🎯 Architecture Strengths
-- **Factory-driven**: Dynamic component creation based on configuration
-- **Template Pattern**: Consistent behavior across implementations
-- **Configuration-separated**: System vs trading settings clearly divided
-- **Extensible**: Easy to add new brokers/exchanges
-- **Testable**: Mock implementations for all components
-- **Type-safe**: Strong typing with abstract base classes
+### 🎯 Thread Architecture Strengths
+- **Centralized Management**: Single point of control for all threading
+- **Type Safety**: Strongly typed thread pool selection
+- **Performance Monitoring**: Real-time statistics and health checks
+- **Fault Tolerance**: Exception handling and recovery mechanisms
+- **Scalability**: Configurable pool sizes based on workload
+- **Testing**: Comprehensive test coverage for all threading scenarios
 
 ---
 
-**🚨 REMEMBER: This system's power comes from the factory pattern combined with event-driven architecture. Always use factories for component creation and follow the established directory structure. When in doubt, check the existing patterns and test thoroughly.**
-- Configuration hot-reloading
-
-### 🔄 Current Event Types
-- QuoteReceived (market data)
-- CandleGenerated (OHLCV + VWAP)
-- EntrySignal (strategy decisions)  
-- ExitSignal (exit conditions)
-- OrderExecuted (order placement)
-- PositionUpdate (position tracking)
-
-### 🎯 Architecture Strengths
-- **Decoupled**: Components communicate only via events
-- **Testable**: Each component tests in isolation
-- **Extensible**: New events/components easy to add
-- **Thread-safe**: Concurrent access properly handled
-- **Observable**: All system activity flows through EventBus
-
----
-
-**🚨 REMEMBER: This system's power comes from strict adherence to the event-driven architecture. Breaking these patterns will break the system. When in doubt, follow the existing patterns and test thoroughly.**
+**🚨 REMEMBER: This system's threading architecture is critical for performance and stability. Always use ThreadManager for concurrent operations, never create threads directly, and ensure proper pool selection for optimal performance. Test thoroughly under load conditions.**

@@ -12,6 +12,8 @@ class StreamerFactory:
     @classmethod
     def register_streamer(cls, streamer_type: str, streamer_class):
         """Register a streamer class with the factory."""
+        if not issubclass(streamer_class, BaseStreamer):
+            raise ValueError("Streamer class must inherit from BaseStreamer")
         cls._streamer_registry[streamer_type.lower()] = streamer_class
     
     @classmethod
@@ -40,14 +42,16 @@ class StreamerFactory:
         streamer_class = cls._streamer_registry[streamer_type]
         
         try:
-            if streamer_type == 'zerodha':
-                return cls._create_zerodha_streamer(streamer_class, symbols, config)
-            elif streamer_type == 'offline':
-                return cls._create_offline_streamer(streamer_class, symbols, config)
-            elif streamer_type == 'binance':
-                return cls._create_binance_streamer(streamer_class, symbols, config)
+            # Convert symbols to appropriate format for each streamer type
+            if streamer_type == 'offline':
+                str_symbols = [str(s) for s in symbols]
+                return streamer_class(
+                    symbols=str_symbols,
+                    base_price=config.get('base_price', 18500.0),
+                    tick_interval=config.get('tick_interval', 1.0)
+                )
             else:
-                # Generic creation for custom streamers
+                # For other streamers, pass symbols and config as-is
                 return streamer_class(symbols=symbols, **config)
                 
         except Exception as e:
@@ -55,44 +59,40 @@ class StreamerFactory:
             raise
     
     @classmethod
-    def _create_zerodha_streamer(cls, streamer_class, symbols: List[Union[str, int]], 
-                                config: Dict[str, Any]):
-        """Create Zerodha streamer with specific configuration."""
-        # Convert symbols to integers if they're strings
-        int_symbols = []
-        for symbol in symbols:
-            if isinstance(symbol, str):
-                try:
-                    int_symbols.append(int(symbol))
-                except ValueError:
-                    raise ValueError(f"Invalid Zerodha symbol format: {symbol}")
-            else:
-                int_symbols.append(symbol)
-        
-        required_keys = ['api_key', 'api_secret', 'name_symbol']
-        for key in required_keys:
-            if key not in config:
-                raise ValueError(f"Missing required config for Zerodha: {key}")
-        
-        return streamer_class(
-            symbols=int_symbols,
-            api_key=config['api_key'],
-            api_secret=config['api_secret'],
-            name_symbol=config['name_symbol'],
-            paper_trade=config.get('paper_trade', True)
-        )
+    def get_available_streamers(cls) -> List[str]:
+        """Get list of available streamer types."""
+        return list(cls._streamer_registry.keys())
     
     @classmethod
-    def _create_offline_streamer(cls, streamer_class, symbols: List[Union[str, int]], 
-                                config: Dict[str, Any]):
-        """Create offline streamer with specific configuration."""
-        # Convert symbols to strings for offline streamer
-        str_symbols = [str(s) for s in symbols]
-        
-        return streamer_class(
-            symbols=str_symbols,
-            base_price=config.get('base_price', 18500.0),
-            tick_interval=config.get('tick_interval', 1.0)
+    def is_streamer_available(cls, streamer_type: str) -> bool:
+        """Check if a streamer type is available."""
+        return streamer_type.lower() in cls._streamer_registry
+
+
+# Register built-in streamers
+def _register_built_in_streamers():
+    """Register all built-in streamer types."""
+    logger = get_logger("StreamerFactory")
+    
+    # Register Offline streamer
+    try:
+        from .offline_streamer import OfflineStreamer
+        StreamerFactory.register_streamer('offline', OfflineStreamer)
+        logger.info("Registered OfflineStreamer")
+    except ImportError as e:
+        logger.warning(f"Could not register OfflineStreamer: {e}")
+    
+    # Register other streamers (if available)
+    try:
+        from src.market.zerodha.zerodha_streamer import ZerodhaStreamer
+        StreamerFactory.register_streamer('zerodha', ZerodhaStreamer)
+        logger.info("Registered ZerodhaStreamer")
+    except ImportError as e:
+        logger.debug(f"ZerodhaStreamer not available: {e}")
+
+
+# Auto-register built-in streamers when module is imported
+_register_built_in_streamers()
         )
     
     @classmethod

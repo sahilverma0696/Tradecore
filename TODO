@@ -1,3 +1,6 @@
-- Modify ZerodhaStreamer on tick according to data coming https://kite.trade/docs/pykiteconnect/v4/#kiteconnect.KiteTicker
-- KiteConnect, use optimally, has reconnect methods and other things as well
-- Set the code to sleep and start at 9:15 am
+Introduced the threadpool manager 
+now need to make the right base class and factory in streamer and execute, provide by factory 
+check registry sequence and others 
+from system config then systems input can be given
+upstox is the starting we;re going with
+sleep manager to be introduced as well
