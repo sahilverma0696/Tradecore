@@ -50,7 +50,7 @@ class ThreadManager:
         if hasattr(self, '_initialized'):
             return
             
-        self.logger = get_logger("ThreadManager")
+        self.logger = get_logger("ThreadManager",console_output=True)
         self.system_config = SystemConfigManager()
         
         # Thread pools for different components
@@ -242,7 +242,8 @@ class ThreadManager:
         # Shutdown thread pools
         for pool_type, executor in self._thread_pools.items():
             try:
-                executor.shutdown(wait=wait, timeout=timeout)
+                # Use shutdown without timeout parameter for compatibility
+                executor.shutdown(wait=wait)
                 self.logger.info(f"Shutdown {pool_type.value} thread pool")
             except Exception as e:
                 self.logger.error(f"Error shutting down {pool_type.value}: {e}")

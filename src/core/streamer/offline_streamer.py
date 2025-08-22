@@ -106,11 +106,11 @@ class OfflineStreamer(BaseStreamer):
     def get_current_prices(self) -> Dict[str, float]:
         """Get current demo prices."""
         return self.current_prices.copy()
-            'bid_qty': bid_qty,
-            'ask_qty': ask_qty,
-            'volume': self.volume_counter,
-            'timestamp': datetime.now()
-        }
+        #     'bid_qty': bid_qty,
+        #     'ask_qty': ask_qty,
+        #     'volume': self.volume_counter,
+        #     'timestamp': datetime.now()
+        # }
     
     def set_base_price(self, price: float):
         """Update base price for demo data."""

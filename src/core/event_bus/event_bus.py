@@ -25,11 +25,11 @@ class EventBus:
         
         self._subscribers: Dict[Type[Event], List[Callable]] = defaultdict(list)
         self._lock = threading.RLock()
-        self._logger = get_logger("EventBus")
+        self._logger = get_logger("EventBus", console_output=True)
         self._event_history: List[Event] = []
         self._max_history = 1000
         self._initialized = True
-        self._logger.info("EventBus initialized")
+        self._logger.info("EventBus initialized and ready for component registration")
     
     def subscribe(self, event_type: Type[Event], callback: Callable[[Event], None], 
                   subscriber_name: str = None):
@@ -37,7 +37,7 @@ class EventBus:
         with self._lock:
             self._subscribers[event_type].append(callback)
             subscriber_name = subscriber_name or getattr(callback, '__name__', 'unknown')
-            self._logger.debug(f"Subscribed {subscriber_name} to {event_type.__name__}")
+            self._logger.info(f"📝 {subscriber_name} subscribed to {event_type.__name__}")
     
     def unsubscribe(self, event_type: Type[Event], callback: Callable[[Event], None]):
         """Unsubscribe from events of a specific type."""
@@ -60,7 +60,7 @@ class EventBus:
                 if event_class in self._subscribers:
                     subscribers.extend(self._subscribers[event_class])
             
-            self._logger.debug(f"Publishing {event.__class__.__name__} to {len(subscribers)} subscribers")
+            self._logger.debug(f"📢 Publishing {event.__class__.__name__} to {len(subscribers)} subscribers")
             
             # Notify all subscribers
             for callback in subscribers:
@@ -68,7 +68,7 @@ class EventBus:
                     callback(event)
                 except Exception as e:
                     subscriber_name = getattr(callback, '__name__', 'unknown')
-                    self._logger.error(f"Error in subscriber {subscriber_name} for {event.__class__.__name__}: {e}")
+                    self._logger.error(f"❌ Error in subscriber {subscriber_name} for {event.__class__.__name__}: {e}")
                     self._logger.debug(traceback.format_exc())
     
     def get_event_history(self, event_type: Type[Event] = None, limit: int = None) -> List[Event]:

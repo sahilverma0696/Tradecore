@@ -7,8 +7,8 @@ import os
 import traceback
 
 import pandas as pd
-from src.core.plotting.live_chart_server import LiveChartServer
-from src.core.event_bus import Publisher, Subscriber, QuoteReceived, CandleGenerated
+# from src.core.plotting.live_chart_server import LiveChartServer
+from src.core.event_bus import Publisher, Subscriber, QuoteEvent, CandleGenerated
 
 DATA_CANDLE_DIR = "data/candles"
 DATA_GRAPH_DIR = "data/graphs"
@@ -34,9 +34,9 @@ class CandleMaker(Publisher, Subscriber):
         self._logger.info(f"CandleMaker initialized with event bus, writing to {self._csv_file}")
         
         # Subscribe to normalized quote events from streamers
-        self.subscribe_to_event(QuoteReceived, self._on_quote_event)
+        self.subscribe_to_event(QuoteEvent, self._on_quote_event)
 
-    def _on_quote_event(self, event: QuoteReceived):
+    def _on_quote_event(self, event: QuoteEvent):
         """Handle normalized quote events from event bus."""
         self._logger.debug(f"Handling quote event: {event.symbol} @ {event.ltp}")
         
@@ -115,7 +115,7 @@ class CandleMaker(Publisher, Subscriber):
 
     def register_plotting_handler(self):
         """Initialize live chart server and subscribe to candle events."""
-        self._chart_server = LiveChartServer()
+        self._chart_server = None# LiveChartServer()
         
         def plotting_handler(event: CandleGenerated):
             self._chart_server.add_candle(event.symbol, event.candle_data)

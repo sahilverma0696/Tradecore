@@ -4,10 +4,10 @@ from collections import defaultdict
 from dataclasses import dataclass, asdict
 from typing import Dict, List, Tuple, Optional
 from src.logger_factory import get_logger
-from src.core.event_bus import Publisher, CandleGenerated, EntrySignal
+from src.core.event_bus import Publisher, Subscriber, CandleGenerated, EntrySignal
 
 
-class VwapStrategy(Publisher):
+class VwapStrategy(Publisher, Subscriber):
     """VWAP cross strategy with integrated exit management."""
 
     def __init__(self, config: dict = None):
