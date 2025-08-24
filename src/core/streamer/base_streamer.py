@@ -144,7 +144,7 @@ class BaseStreamer(Publisher, ABC):
             try:
                 self.publish_event(event)
                 # Use correct attribute names for QuoteEvent
-                self._logger.debug(f"Published quote for {event.instrument}: LTP={event.ltp}, LTQ={event.ltq}")
+                # self._logger.debug(f"Published quote for {event.instrument}: LTP={event.ltp}, LTQ={event.ltq}")
 
             except Exception as e:
                 # Use correct attribute names for QuoteEvent
@@ -168,7 +168,7 @@ class BaseStreamer(Publisher, ABC):
             
             # Publish in current event loop
             self.publish_event(quote_event)
-            self._logger.debug(f"Published quote async for {symbol}: LTP={ltp}, LTQ={volume}")
+            # self._logger.debug(f"Published quote async for {symbol}: LTP={ltp}, LTQ={volume}")
             
         except Exception as e:
             self._logger.error(f"Error publishing quote async for {symbol}: {e}")

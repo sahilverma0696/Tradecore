@@ -41,7 +41,7 @@ class CandleMaker(Publisher, Subscriber):
 
     def _on_quote_event(self, event: QuoteEvent):
         """Handle incoming quote events and build candles."""
-        self._logger.debug(f"Handling quote event: {event.instrument} @ {event.ltp}")
+        # self._logger.debug(f"Handling quote event: {event.instrument} @ {event.ltp}")
         
         symbol = event.instrument
         timestamp = event.timestamp
@@ -89,7 +89,7 @@ class CandleMaker(Publisher, Subscriber):
         try:
             self._logger.debug(f"Finalizing candle for {symbol}: {candle}")
             
-            # Create CandleGenerated event with correct parameter names
+            # Create CandleGenerated event with all required parameters including source
             candle_event = CandleGenerated(
                 timestamp=candle['timestamp'],
                 symbol=symbol,
@@ -99,7 +99,8 @@ class CandleMaker(Publisher, Subscriber):
                 low=candle['low'],
                 close=candle['close'],
                 volume=candle['volume'],
-                vwap=candle.get('vwap', 0.0)
+                vwap=candle.get('vwap', 0.0),
+                source="CandleMaker"  # Add missing source parameter
             )
             
             self.publish_event(candle_event)
