@@ -7,7 +7,6 @@ from datetime import datetime
 from src.logger_factory import get_logger
 from src.core.event_bus import Publisher, QuoteReceived
 from src.core.thread_manager import ThreadManager, ThreadPoolType
-from .quote_normalizer import QuoteNormalizer
 
 
 class BaseStreamer(Publisher, ABC):
@@ -28,7 +27,6 @@ class BaseStreamer(Publisher, ABC):
         self._logger = get_logger(self.name)
         self._is_running = False
         self._connection_thread = None
-        self._quote_normalizer = QuoteNormalizer()
         
         # Thread management
         self._thread_manager = ThreadManager()
@@ -138,31 +136,19 @@ class BaseStreamer(Publisher, ABC):
         """Check if streamer is running."""
         return self._is_running
     
-    def publish_quote(self, symbol: str, ltp: float, volume: int = 0, 
-                     bid: float = 0, ask: float = 0, raw_data: Dict[str, Any] = None):
+    def publish_quote(self, event):
         """
         Publish a normalized quote as QuoteReceived event using event bus thread pool.
         """
         def _publish_quote_task():
             try:
-                quote_event = QuoteReceived(
-                    timestamp=datetime.now(),
-                    source=self.name,
-                    symbol=symbol,
-                    instrument=hash(symbol),  # Simple hash for instrument ID
-                    ltp=ltp,
-                    volume=volume,
-                    last_quantity=volume,
-                    change=0.0,  # Can be calculated if needed
-                    raw_data=raw_data or {}
-                )
                 
-                self.publish_event(quote_event)
-                self._logger.debug(f"Published quote for {symbol}: LTP={ltp}, Volume={volume}")
-                
+                self.publish_event(event)
+                self._logger.debug(f"Published quote for {event.symbol}: LTP={event.ltp}, Volume={event.volume}")
+
             except Exception as e:
-                self._logger.error(f"Error publishing quote for {symbol}: {e}")
-        
+                self._logger.error(f"Error publishing quote for {event.symbol}: {e}")
+
         # Submit quote publishing to event bus thread pool
         self._thread_manager.submit_task(ThreadPoolType.EVENT_BUS, _publish_quote_task)
     
@@ -188,10 +174,7 @@ class BaseStreamer(Publisher, ABC):
             
         except Exception as e:
             self._logger.error(f"Error publishing quote async for {symbol}: {e}")
-    
-    def get_normalizer(self) -> QuoteNormalizer:
-        """Get the quote normalizer instance."""
-        return self._quote_normalizer
+
     
     def get_status(self) -> Dict[str, Any]:
         """Get current status of the streamer."""
@@ -218,6 +201,12 @@ class BaseStreamer(Publisher, ABC):
     def _cleanup_connection(self):
         """Clean up the connection."""
         pass
+
+    @abstractmethod
+    def _normalize_raw_data(self, raw_data: Dict[str, Any], symbol: str) -> QuoteReceived:
+        """Normalize raw data to QuoteReceived event."""
+        pass
+    
     
     # Optional async methods - subclasses can implement these
     async def _run_connection_async(self):

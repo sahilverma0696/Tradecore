@@ -9,11 +9,12 @@ from typing import List, Dict, Any
 
 from .base_streamer import BaseStreamer
 from src.core.thread_manager import ThreadManager, ThreadPoolType
+from src.core.event_bus.events import QuoteEvent
 
 class BinanceStreamer(BaseStreamer):
     """Binance WebSocket streamer for mark price data from futures."""
-    
-    def __init__(self, symbols: List[str], name_symbol: str = "CRYPTO", **kwargs):
+
+    def __init__(self, symbols: List[str], name_symbol: str, **kwargs):
         # Initialize BaseStreamer which includes Publisher mixin
         super().__init__(symbols, name_symbol)
         self.name_symbol = name_symbol
@@ -93,23 +94,33 @@ class BinanceStreamer(BaseStreamer):
         """Handle incoming WebSocket messages."""
         try:
             data = json.loads(message)
-            
-            # Handle subscription confirmations
-            if 'result' in data and data.get('id') == self._subscription_id:
-                if data['result'] is None:
-                    self._logger.info("Successfully subscribed to Binance mark price streams")
-                    self._is_subscribed = True
-                else:
-                    self._logger.error(f"Subscription failed: {data}")
-                return
-            
-            # Handle mark price updates only
-            if 'e' in data and data['e'] == 'markPriceUpdate':
-                self._process_mark_price_data(data)
+            # print(data)
+            event = self._normalize_raw_data(data, self.name_symbol)
+            print(event)
+            if event:
+                self.publish_quote(
+                    event
+                )
                     
         except Exception as e:
             self._logger.error(f"Error parsing Binance message: {e}")
 
+    def _normalize_raw_data(self, raw_data, symbol):
+        """Normalize raw Binance mark price data to QuoteEvent."""
+        try:
+            return QuoteEvent(
+                timestamp=raw_data['T'],
+                instrument=raw_data['s'],
+                name=symbol,
+                ltp=float(raw_data['p']),
+                ltq=float(raw_data['q']),
+                source=self.name
+            )
+        except Exception as e:
+            self._logger.error(f"Error normalizing Binance data: {e}")
+            return None
+        
+    
     def _process_mark_price_data(self, mark_price_data):
         """Process Mark Price Stream data from Binance futures and publish to EventBus."""
         try:
@@ -153,7 +164,7 @@ class BinanceStreamer(BaseStreamer):
             
         except Exception as e:
             self._logger.error(f"Error processing Binance mark price data: {e}")
-
+        """Normalize raw Binance mark price data to QuoteEvent."""
     def _on_open(self, ws):
         """Handle WebSocket connection open."""
         self._logger.info("Binance WebSocket connection opened")

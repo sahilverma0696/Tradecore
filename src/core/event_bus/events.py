@@ -21,15 +21,11 @@ class QuoteEvent(Event):
     instrument: str  # Can be string or number based on exchange
     name: str       # Symbol name
     ltp: float      # Last Traded Price
-    ltq: int        # Last Traded Quantity
-    
+    ltq: float      # Last Traded Quantity
+
     def __post_init__(self):
         super().__post_init__()
-        # Ensure required fields are valid
-        if self.ltp <= 0:
-            raise ValueError(f"Invalid LTP: {self.ltp}")
-        if self.ltq < 0:
-            raise ValueError(f"Invalid LTQ: {self.ltq}")
+        
 
 
 @dataclass

@@ -1,6 +1,5 @@
 from .base_streamer import BaseStreamer
-from .quote_normalizer import QuoteNormalizer
-from .events import QuoteEvent
+from src.core.event_bus.events import QuoteEvent
 from .streamer_factory import StreamerFactory
 
 # Import specific streamers if available
