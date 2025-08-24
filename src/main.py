@@ -144,8 +144,16 @@ def create_and_register_components(system_config, trading_config):
         streamer_type = streamer_config['type']
         streamer_config_data = streamer_config['config']
         
-        # Get symbols from trading config
-        symbols = trading_config.get().get('symbols', [])
+        # Get symbols based on streamer type
+        if streamer_type == 'binance':
+            # Get symbols from binance configuration section
+            binance_config = trading_config.get().get('binance', {})
+            symbols = binance_config.get('symbols', ['BTCUSDT'])
+            logger.info(f"Using Binance symbols: {symbols}")
+        else:
+            # Get symbols from main configuration for other streamers
+            symbols = trading_config.get().get('symbols', [])
+            
         if not symbols:
             raise ValueError("No symbols configured for streaming")
         
@@ -156,6 +164,14 @@ def create_and_register_components(system_config, trading_config):
             config=streamer_config_data
         )
         logger.info(f"   ✅ {streamer_type} streamer created for market data")
+        
+        # Log subscription status
+        logger.info("📢 Event subscription summary:")
+        event_bus = EventBus()
+        logger.info(f"   QuoteReceived subscribers: {len(event_bus._subscribers.get('QuoteReceived', []))}")
+        logger.info(f"   CandleGenerated subscribers: {len(event_bus._subscribers.get('CandleGenerated', []))}")
+        logger.info(f"   EntrySignal subscribers: {len(event_bus._subscribers.get('EntrySignal', []))}")
+        logger.info(f"   ExitSignal subscribers: {len(event_bus._subscribers.get('ExitSignal', []))}")
         
         logger.info("✅ All components created and registered with EventBus")
         return components

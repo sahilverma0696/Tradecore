@@ -49,5 +49,40 @@
   "market_close_time": "13:39",
   "default_quantity": 75,
   "buy_quantity": 225,
-  "sell_quantity": 75
+  "sell_quantity": 75,
+  "binance": {
+    "api_key": "your_binance_api_key",
+    "api_secret": "your_binance_secret",
+    "symbols": ["BTCUSDT"],
+    "name_symbol": "CRYPTO_FUTURES",
+    "testnet": false,
+    "stream_type": "markPrice",
+    "base_url": "https://fapi.binance.com",
+    "ws_url": "wss://fstream.binance.com/ws",
+    "execution": {
+      "order_type": "MARKET",
+      "time_in_force": "GTC",
+      "recv_window": 5000,
+      "test_mode": true
+    },
+    "quantities": {
+      "default": 0.01,
+      "BTCUSDT": 0.01,
+      "ETHUSDT": 0.1,
+      "ADAUSDT": 100,
+      "DOTUSDT": 10
+    },
+    "risk_management": {
+      "max_position_size_usdt": 1000,
+      "max_daily_loss_usdt": 500,
+      "max_leverage": 5,
+      "stop_loss_percent": 0.02,
+      "take_profit_percent": 0.05
+    },
+    "futures_settings": {
+      "margin_type": "ISOLATED",
+      "leverage": 3,
+      "position_side": "BOTH"
+    }
+  }
 }

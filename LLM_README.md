@@ -6,13 +6,15 @@
 
 This system follows strict architectural patterns. Violating these patterns will break the system. Follow these rules:
 
-1. **NEVER** create new event types without updating the event bus imports
-2. **ALWAYS** use the EventBus for inter-component communication 
-3. **NEVER** use direct callbacks or handler registration between components
-4. **ALWAYS** inherit from Publisher/Subscriber mixins for event communication
-5. **NEVER** import from the wrong locations - follow the directory structure
-6. **ALWAYS** check existing tests before implementing new features
-7. **NEVER** modify core architecture without understanding the entire flow
+1. **NEVER** create new thread pools without using ThreadManager
+2. **ALWAYS** use ThreadManager for all concurrent operations
+3. **NEVER** create threads directly - use thread pool submission
+4. **ALWAYS** use the EventBus for inter-component communication 
+5. **NEVER** use direct callbacks or handler registration between components
+6. **ALWAYS** inherit from Publisher/Subscriber mixins for event communication
+7. **NEVER** import from the wrong locations - follow the directory structure
+8. **ALWAYS** check existing tests before implementing new features
+9. **NEVER** modify core architecture without understanding the entire flow
 
 ---
 
@@ -99,7 +101,7 @@ src/
 ├── main.py                          # 🎯 ENTRY POINT - ThreadManager initialization
 ├── config_manager.py                # Hot-reload trading config
 ├── system_config_manager.py         # System-wide configuration
-├── logger_factory.py               # Centralized logging
+├── logger_factory.py               # Centralized logging with console output
 │
 ├── core/
 │   ├── thread_manager.py            # 🚨 THREAD POOL MANAGEMENT (Singleton)
@@ -122,9 +124,9 @@ src/
 │   │
 │   ├── streamer/                    # 🎯 STREAMING LAYER (Uses STREAMER pool)
 │   │   ├── base_streamer.py        # Abstract base with ThreadManager integration
-│   │   ├── quote_normalizer.py     # Standardizes quote formats
-│   │   ├── events.py               # Streamer-specific events
-│   │   └── offline_streamer.py     # Mock data generator
+│   │   ├── streamer_factory.py     # Factory for creating streamers
+│   │   ├── offline_streamer.py     # Demo data generator
+│   │   └── quote_normalizer.py     # Standardizes quote formats
 │   │
 │   ├── candle_maker.py             # 🎯 OHLCV + VWAP (Uses EVENT_BUS pool)
 │   ├── order_manager.py            # Order management (Uses EXECUTOR pool)
@@ -149,6 +151,7 @@ tests/
 
 system_config.json                  # 🔧 SYSTEM + THREAD CONFIGURATION
 trading_config.json                 # 🔧 TRADING CONFIGURATION
+CONFIG_OPTIONS.md                   # 🔧 COMPLETE CONFIGURATION REFERENCE
 ```
 
 ---
@@ -185,30 +188,17 @@ OrderManager (EXECUTOR Pool)
     │ calls ExecutorFactory → BaseExecutor
 ```
 
-### 3. **Thread Pool Task Submission Pattern**
-```
-Component (Any Pool)
-    │
-    ├── For CPU-bound tasks:
-    │   ThreadManager.submit_task(APPROPRIATE_POOL, sync_function)
-    │
-    ├── For I/O-bound tasks:
-    │   ThreadManager.submit_async_task(ASYNC_POOL, async_coroutine)
-    │
-    └── For event publishing:
-        ThreadManager.submit_task(EVENT_BUS, publish_event_function)
-```
-
 ---
 
 ## 🚨 CRITICAL IMPLEMENTATION RULES (UPDATED)
 
-### Rule 1: Thread Pool Usage (NEW)
+### Rule 1: Thread Pool Usage (MANDATORY)
 ```python
 # ✅ CORRECT - Use ThreadManager for all threading
 from src.core.thread_manager import ThreadManager, ThreadPoolType
 
 thread_manager = ThreadManager()
+thread_manager.initialize_pools()  # CRITICAL - Must initialize first
 
 # Submit CPU-bound task
 future = thread_manager.submit_task(
@@ -229,44 +219,57 @@ thread = threading.Thread(target=some_function)  # DON'T DO THIS
 thread.start()
 ```
 
-### Rule 2: Component Thread Pool Assignment
+### Rule 2: Logger Usage with Console Output
 ```python
-# ✅ CORRECT - Use appropriate pool for component type
-class StreamerComponent(BaseStreamer):
-    def process_quotes(self):
-        # Use STREAMER pool for market data processing
-        self._thread_manager.submit_task(
-            ThreadPoolType.STREAMER,
-            self._process_quote_batch
-        )
+# ✅ CORRECT - Use logger with console output for important components
+from src.logger_factory import get_logger
 
-class StrategyComponent(Publisher):
-    def generate_signals(self):
-        # Use STRATEGY pool for signal generation
-        thread_manager = ThreadManager()
-        thread_manager.submit_task(
-            ThreadPoolType.STRATEGY,
-            self._analyze_market_conditions
-        )
+# For main components (console + file logging)
+logger = get_logger("MainComponent", console_output=True)
 
-# ❌ WRONG - Using wrong pool type
-class StrategyComponent:
-    def generate_signals(self):
-        # Wrong pool for strategy work
-        thread_manager.submit_task(ThreadPoolType.EXECUTOR, strategy_work)
+# For utility components (file logging only)
+logger = get_logger("UtilityComponent", console_output=False)
+
+# ❌ WRONG - Standard print statements
+print("Something happened")  # Use logger instead
 ```
 
-### Rule 3: Event Publishing Through Thread Pools
+### Rule 3: Factory Pattern for Component Creation
+```python
+# ✅ CORRECT - Use factories for component creation
+from src.core.streamer.streamer_factory import StreamerFactory
+from src.core.executors.executor_factory import ExecutorFactory
+
+streamer = StreamerFactory.create_streamer(
+    streamer_type='offline',
+    symbols=['NIFTY'],
+    config={'base_price': 18500.0}
+)
+
+executor = ExecutorFactory.create_executor(
+    broker='mock',
+    config={'slippage_factor': 0.01}
+)
+
+# ❌ WRONG - Direct instantiation
+from src.core.streamer.offline_streamer import OfflineStreamer
+streamer = OfflineStreamer()  # Bypasses factory pattern
+```
+
+### Rule 4: Event Publishing Through Thread Pools
 ```python
 # ✅ CORRECT - Publish events through EVENT_BUS pool
 class MarketDataProcessor(Publisher):
+    def __init__(self):
+        super().__init__()
+        self.thread_manager = ThreadManager()
+        
     def publish_quote(self, quote_data):
         def _publish_task():
             event = QuoteReceived(...)
             self.publish_event(event)
         
-        thread_manager = ThreadManager()
-        thread_manager.submit_task(ThreadPoolType.EVENT_BUS, _publish_task)
+        self.thread_manager.submit_task(ThreadPoolType.EVENT_BUS, _publish_task)
 
 # ❌ WRONG - Direct event publishing without thread pool
 class BadProcessor(Publisher):
@@ -275,70 +278,53 @@ class BadProcessor(Publisher):
         self.publish_event(event)  # Blocks calling thread
 ```
 
-### Rule 4: Async Operations in Thread Pools
-```python
-# ✅ CORRECT - Use async loops for I/O-bound operations
-class AsyncStreamer(BaseStreamer):
-    async def stream_data_async(self):
-        while self.is_running:
-            data = await self.fetch_market_data()
-            await self.process_data_async(data)
-    
-    def start_streaming(self):
-        thread_manager = ThreadManager()
-        future = thread_manager.submit_async_task(
-            ThreadPoolType.STREAMER,
-            self.stream_data_async()
-        )
-
-# ❌ WRONG - Blocking operations in async context
-class BadAsyncStreamer:
-    async def stream_data_async(self):
-        data = requests.get(url)  # Blocking call in async context
-```
-
 ---
 
-## 🧪 TESTING ARCHITECTURE (THREAD-FOCUSED)
+## 🧪 TESTING ARCHITECTURE (COMPREHENSIVE)
 
-### Thread Manager Test Categories
+### Test File Structure
 ```
-tests/test_thread_manager.py
-├── Singleton pattern validation
-├── Thread-safe singleton creation
-├── Pool initialization and configuration
-├── Task submission (sync/async)
-├── Error handling and propagation
-├── Statistics and monitoring
-└── Graceful shutdown
-
-tests/test_thread_manager_performance.py  
-├── High-volume task submission
-├── Concurrent pool usage
-├── Async task performance
-├── Memory usage under load
-└── Latency distribution analysis
-
-tests/test_thread_manager_stress.py
-├── Exception handling under load
-├── Thread pool saturation
-├── Rapid start/stop cycles
-├── Mixed chaotic workloads
-└── Shutdown with pending tasks
+tests/
+├── test_thread_manager.py           # Core ThreadManager functionality
+│   ├── Singleton pattern tests
+│   ├── Thread pool initialization
+│   ├── Task submission and completion
+│   ├── Error handling and statistics
+│   └── Graceful shutdown tests
+│
+├── test_thread_manager_performance.py # Performance under load
+│   ├── High-volume task submission
+│   ├── Concurrent pool usage
+│   ├── Memory usage monitoring
+│   └── Latency distribution analysis
+│
+├── test_thread_manager_stress.py    # Stress and edge cases
+│   ├── Exception handling under load
+│   ├── Thread pool saturation
+│   ├── Mixed chaotic workloads
+│   └── Shutdown with pending tasks
+│
+└── test_event_bus.py                # EventBus integration tests
+    ├── Event publishing and subscription
+    ├── Thread-safe event handling
+    ├── Publisher/Subscriber mixins
+    └── Trading workflow simulation
 ```
 
-### Thread-Safe Component Testing Pattern
+### Thread-Safe Testing Pattern
 ```python
-# Thread-safe component test pattern
+# Standard test pattern for thread-safe components
 class TestThreadSafeComponent(unittest.TestCase):
     def setUp(self):
         ThreadManager._instance = None  # Reset singleton
+        EventBus._instance = None       # Reset EventBus
         self.thread_manager = ThreadManager()
         self.thread_manager.initialize_pools()
     
     def tearDown(self):
         self.thread_manager.shutdown(wait=True, timeout=5.0)
         ThreadManager._instance = None
+        EventBus._instance = None
     
     def test_concurrent_operations(self):
         # Test component under concurrent access
@@ -358,60 +344,35 @@ class TestThreadSafeComponent(unittest.TestCase):
 
 ---
 
-## 🔧 CONFIGURATION SYSTEM (THREAD-ENHANCED)
-
-### system_config.json Structure (Thread Configuration)
-```json
-{
-  "threading": {
-    "event_bus_workers": 2,
-    "streamer_workers": 4,
-    "strategy_workers": 2,
-    "executor_workers": 2,
-    "system_workers": 2,
-    "max_worker_threads": 8,
-    "thread_timeout_seconds": 60,
-    "daemon_threads": true
-  },
-  "streamer": {
-    "type": "offline",
-    "async_enabled": true,
-    "config": {
-      "offline": {
-        "tick_interval": 1.0,
-        "async_mode": true
-      }
-    }
-  },
-  "performance": {
-    "enable_profiling": false,
-    "memory_monitoring": true,
-    "gc_collection_interval": 600
-  }
-}
-```
-
----
-
-## 🎯 RUNNING TESTS (COMPREHENSIVE)
+## 🎯 RUNNING TESTS (COMMAND REFERENCE)
 
 ### Core Thread Manager Tests
 ```bash
-# Basic functionality
+# Basic functionality tests
 python3 -m unittest tests.test_thread_manager -v
 
-# Performance under load
+# Performance tests under load
 python3 -m unittest tests.test_thread_manager_performance -v
 
-# Stress and edge cases  
+# Stress tests and edge cases  
 python3 -m unittest tests.test_thread_manager_stress -v
 
 # Specific test methods
-python3 -m unittest tests.test_thread_manager.TestThreadManager.test_singleton_pattern
-python3 -m unittest tests.test_thread_manager.TestThreadManager.test_concurrent_task_submission
+python3 -m unittest tests.test_thread_manager.TestThreadManager.test_singleton_pattern -v
+python3 -m unittest tests.test_thread_manager.TestThreadManager.test_concurrent_task_submission -v
 ```
 
-### Performance Testing
+### Event Bus Tests
+```bash
+# Event bus functionality
+python3 -m unittest tests.test_event_bus -v
+
+# Specific event bus tests
+python3 -m unittest tests.test_event_bus.TestEventBus.test_thread_safety -v
+python3 -m unittest tests.test_event_bus.TestEventIntegration.test_trading_workflow -v
+```
+
+### Performance & Stress Testing
 ```bash
 # High-volume task processing
 python3 -m unittest tests.test_thread_manager_performance.TestThreadManagerPerformance.test_high_volume_task_submission -v
@@ -419,70 +380,57 @@ python3 -m unittest tests.test_thread_manager_performance.TestThreadManagerPerfo
 # Memory usage monitoring
 python3 -m unittest tests.test_thread_manager_performance.TestThreadManagerPerformance.test_memory_usage_under_load -v
 
-# Latency distribution
-python3 -m unittest tests.test_thread_manager_performance.TestThreadManagerPerformance.test_latency_distribution -v
-```
-
-### Stress Testing
-```bash
-# Exception handling under load
-python3 -m unittest tests.test_thread_manager_stress.TestThreadManagerStress.test_exception_handling_stress -v
-
-# Thread pool saturation
-python3 -m unittest tests.test_thread_manager_stress.TestThreadManagerStress.test_thread_pool_saturation -v
-
 # Chaos testing
 python3 -m unittest tests.test_thread_manager_stress.TestThreadManagerStress.test_mixed_workload_chaos -v
 ```
 
-### Integration Testing
+### Run All Tests
 ```bash
-# Full system with thread pools
-python3 -m unittest tests.test_integration_threading -v
+# Complete test suite
+python3 -m unittest discover -s tests -v
 
-# Event bus with thread pools
-python3 -m unittest tests.test_event_bus_threading -v
+# With coverage reporting
+python3 -m coverage run -m unittest discover -s tests
+python3 -m coverage report -m
 ```
 
 ---
 
-## 🎯 EXTENDING THE SYSTEM (THREAD-AWARE)
+## 🔧 CONFIGURATION SYSTEM (COMPLETE REFERENCE)
 
-### Adding Thread-Safe Components
-1. **Inherit from appropriate base class**
-```python
-class NewComponent(Publisher, Subscriber):
-    def __init__(self):
-        super().__init__()
-        self.thread_manager = ThreadManager()
-```
+### Key Configuration Files
+- **`system_config.json`**: Thread pools, component types, logging, performance
+- **`trading_config.json`**: Symbols, strategies, risk management, API credentials  
+- **`CONFIG_OPTIONS.md`**: Complete reference of all configuration options
 
-2. **Use appropriate thread pool**
-```python
-def process_data(self, data):
-    # Submit to appropriate pool based on component type
-    future = self.thread_manager.submit_task(
-        ThreadPoolType.STRATEGY,  # or STREAMER, EXECUTOR, etc.
-        self._process_data_impl,
-        data
-    )
-    return future.result(timeout=30.0)
-```
-
-3. **Handle async operations properly**
-```python
-async def async_operation(self):
-    # Use async pools for I/O-bound work
-    future = self.thread_manager.submit_async_task(
-        ThreadPoolType.STREAMER,
-        self._fetch_data_async()
-    )
-    return await future
+### Essential System Configuration
+```json
+{
+  "threading": {
+    "event_bus_workers": 2,
+    "streamer_workers": 4,
+    "strategy_workers": 2,
+    "executor_workers": 2,
+    "system_workers": 2
+  },
+  "streamer": {
+    "type": "offline",
+    "async_enabled": true
+  },
+  "executor": {
+    "type": "mock"
+  },
+  "logging": {
+    "level": "INFO",
+    "console_output": true,
+    "file_output": true
+  }
+}
 ```
 
 ---
 
-## ⚠️ COMMON PITFALLS FOR LLM AGENTS (THREAD-FOCUSED)
+## ⚠️ COMMON PITFALLS FOR LLM AGENTS
 
 ### 1. **Direct Threading (CRITICAL ERROR)**
 ```python
@@ -495,21 +443,73 @@ def start_background_work():
 # ✅ CORRECT - Use ThreadManager
 def start_background_work():
     thread_manager = ThreadManager()
+    thread_manager.initialize_pools()
     future = thread_manager.submit_task(ThreadPoolType.SYSTEM, work_function)
 ```
 
-### 2. **Wrong Thread Pool Selection**
+### 2. **Missing Initialization**
 ```python
-# ❌ WRONG - Using executor pool for strategy work
+# ❌ WRONG - Using ThreadManager without initialization
+thread_manager = ThreadManager()
+thread_manager.submit_task(ThreadPoolType.SYSTEM, task)  # Will fail
+
+# ✅ CORRECT - Initialize pools first
+thread_manager = ThreadManager()
+thread_manager.initialize_pools()
+thread_manager.submit_task(ThreadPoolType.SYSTEM, task)
+```
+
+### 3. **Wrong Thread Pool Selection**
+```python
+# ❌ WRONG - Using wrong pool for component type
 thread_manager.submit_task(ThreadPoolType.EXECUTOR, strategy_calculation)
 
-# ✅ CORRECT - Use strategy pool for strategy work  
+# ✅ CORRECT - Use appropriate pool for component type
 thread_manager.submit_task(ThreadPoolType.STRATEGY, strategy_calculation)
 ```
 
-### 3. **Blocking Async Operations**
+### 4. **Duplicate Code in Tests**
 ```python
-# ❌ WRONG - Blocking call in async context
+# ❌ WRONG - Duplicate code blocks
+if __name__ == "__main__":
+    unittest.main()
+    # Duplicate code here
+
+# ✅ CORRECT - Single main block
+if __name__ == "__main__":
+    unittest.main()
+```
+
+---
+
+## 📋 SYSTEM STATUS & CAPABILITIES
+
+### ✅ Implemented & Tested
+- **Thread pool management with comprehensive testing**
+- **Thread-safe singleton patterns for core components**
+- **Factory patterns for dynamic component creation**
+- **Event-driven architecture with proper thread integration**
+- **Console logging support for real-time monitoring**
+- **Comprehensive test coverage for all threading scenarios**
+- **Graceful shutdown with proper cleanup**
+
+### 🔄 Current Component Types
+- **Streamers**: OfflineStreamer, ZerodhaStreamer, BinanceStreamer
+- **Executors**: MockExecutor, ZerodhaExecutor, BinanceExecutor
+- **Strategies**: VwapStrategy with entry/exit signal generation
+- **Core**: EventBus, CandleMaker, OrderManager with thread integration
+
+### 🎯 Architecture Strengths
+- **Centralized Threading**: Single ThreadManager controls all concurrency
+- **Type Safety**: Strongly typed thread pool selection
+- **Performance Monitoring**: Real-time statistics and health checks
+- **Fault Tolerance**: Exception handling and recovery mechanisms
+- **Scalability**: Configurable pool sizes for different workloads
+- **Testing**: Comprehensive coverage including stress and performance tests
+
+---
+
+**🚨 REMEMBER: This system's power comes from the combination of thread-managed concurrency and event-driven architecture. Always use ThreadManager for threading, factories for component creation, and EventBus for communication. Test thoroughly under concurrent load conditions.**
 async def async_streamer():
     data = requests.get(url)  # Blocks event loop
 

@@ -2,37 +2,47 @@ import csv
 from datetime import datetime
 from collections import defaultdict
 from dataclasses import dataclass, asdict
-from typing import Dict, List, Tuple, Optional
+from typing import Dict, List, Tuple, Optional, Any
+from src.core.event_bus import Subscriber, Publisher, CandleGenerated, EntrySignal, ExitSignal
 from src.logger_factory import get_logger
-from src.core.event_bus import Publisher, Subscriber, CandleGenerated, EntrySignal
 
 
-class VwapStrategy(Publisher, Subscriber):
+class VwapStrategy(Subscriber, Publisher):
     """VWAP cross strategy with integrated exit management."""
 
-    def __init__(self, config: dict = None):
-        super().__init__()
-        self._logger = get_logger("VWAPStrategy")
-        config = config or {}
-        self.default_quantity = config.get('default_quantity', 75)
-        self.exit_steps = config.get('exit_steps', [])
+    def __init__(self, config: Dict[str, Any] = None):
+        super().__init__()  # Initialize both mixins
+        self.config = config or {}
+        self.logger = get_logger("VwapStrategy", console_output=True)
+        self.default_quantity = self.config.get('default_quantity', 75)
+        self.exit_steps = self.config.get('exit_steps', [])
         self.positions: Dict[str, dict] = {}
-        self._logger.info("VWAPStrategy initialized with event bus.")
+        self.logger.info("VWAPStrategy initialized with event bus.")
         
         # Subscribe to candle events
-        self.subscribe_to_event(CandleGenerated, self._on_candle_event)
+        self.subscribe_to_event(CandleGenerated, self.on_candle_generated)
+        self.logger.info(f"✅ VwapStrategy subscribed to CandleGenerated events")
 
-    def _on_candle_event(self, event: CandleGenerated):
-        """Handle candle events from event bus."""
-        self.on_candle(event.symbol, event.candle_data)
+    def on_candle_generated(self, event: CandleGenerated):
+        """Handle new candle events and generate trading signals."""
+        try:
+            self.logger.info(f"💡 Received candle for {event.symbol}: Close={event.close}, VWAP={event.vwap}")
+            
+            # Process candle and generate signals
+            self.process_candle(event)
+            
+        except Exception as e:
+            self.logger.error(f"Error processing candle for {event.symbol}: {e}")
 
-    def on_candle(self, symbol: str, candle: dict):
+    def process_candle(self, event: CandleGenerated):
+        symbol = event.symbol
+        candle = event.candle_data
         vwap = candle.get('vwap')
         open_price = candle['open']
         close_price = candle['close']
 
         if vwap is None:
-            self._logger.warning(f"VWAP missing in candle for {symbol} @ {candle['timestamp']}")
+            self.logger.warning(f"VWAP missing in candle for {symbol} @ {candle['timestamp']}")
             return
 
         if symbol in self.positions:
@@ -57,7 +67,7 @@ class VwapStrategy(Publisher, Subscriber):
             'candle': candle
         }
         self.positions[symbol] = entry_signal_data
-        self._logger.info(f"[ENTRY SIGNAL] {side} {symbol} @ {price} VWAP={vwap}")
+        self.logger.info(f"[ENTRY SIGNAL] {side} {symbol} @ {price} VWAP={vwap}")
         
         # Publish entry signal event
         entry_event = EntrySignal(

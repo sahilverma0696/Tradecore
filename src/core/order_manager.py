@@ -1,19 +1,26 @@
 from typing import Dict
 from datetime import datetime
+from src.core.event_bus import Subscriber, Publisher, EntrySignal, ExitSignal, OrderExecuted
 from src.logger_factory import get_logger
 from src.core.order_object import OrderObject
 from src.core.order_logger import OrderLogger
 
-class OrderManager:
-    """Manages active orders and delegates logging."""
-
+class OrderManager(Subscriber, Publisher):
+    """Manages order lifecycle and execution."""
+    
     def __init__(self, log_dir: str = "logs"):
+        super().__init__()  # Initialize both mixins
         self._orders: Dict[str, OrderObject] = {}   # symbol -> OrderObject
         self._logger = get_logger("OrderManager")
         self._order_logger = OrderLogger(log_dir)
         self._handlers = []  # callback for order execution
         self._exit_manager = None  # Will be set from main.py
         self._logger.info("OrderManager initialized")
+        
+        # Subscribe to trading signal events - CRITICAL for receiving trading signals
+        self.subscribe_to_event(EntrySignal, self.on_entry_signal)
+        self.subscribe_to_event(ExitSignal, self.on_exit_signal)
+        self._logger.info(f"✅ OrderManager subscribed to EntrySignal and ExitSignal events")
         
     def register_handler(self, cb):
         if callable(cb):
@@ -136,3 +143,26 @@ class OrderManager:
 
     def all_orders(self):
         return self._orders.values()
+
+    def on_entry_signal(self, event: EntrySignal):
+        """Handle entry signal events."""
+        try:
+            self._logger.info(f"📋 Received entry signal for {event.symbol}: {event.direction} at {event.price}")
+            
+            # Process entry signal and place order
+            self.handle_entry_signal(event)
+            
+        except Exception as e:
+            self._logger.error(f"Error handling entry signal: {e}")
+    
+    def on_exit_signal(self, event: ExitSignal):
+        """Handle exit signal events."""
+        try:
+            self._logger.info(f"📋 Received exit signal for {event.symbol}: {event.direction} at {event.price}")
+            
+            # Process exit signal and close position
+            self.handle_exit_signal(event)
+            
+        except Exception as e:
+            self._logger.error(f"Error handling exit signal: {e}")
+            self._logger.error(f"Error handling exit signal: {e}")

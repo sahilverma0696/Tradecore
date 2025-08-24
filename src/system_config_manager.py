@@ -77,11 +77,11 @@ class SystemConfigManager:
         }
         
     def get_executioner_config(self) -> Dict[str, Any]:
-        """Get executioner configuration."""
-        exec_type = self.get('executioner.type', 'mock')
+        """Get executor configuration."""
+        exec_type = self.get('executor.type', 'mock')
         return {
             'type': exec_type,
-            'config': self.get(f'executioner.config.{exec_type}', {})
+            'config': self.get(f'executor.config.{exec_type}', {})
         }
         
     def is_offline_mode(self) -> bool:
@@ -102,12 +102,12 @@ class SystemConfigManager:
                 "type": "offline",
                 "config": {
                     "offline": {
-                        "data_dir": "data",
-                        "playback_speed": 1.0
+                        "tick_interval": 1.0,
+                        "base_price": 18500.0
                     }
                 }
             },
-            "executioner": {
+            "executor": {
                 "type": "mock",
                 "config": {
                     "mock": {

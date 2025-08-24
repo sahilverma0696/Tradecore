@@ -60,7 +60,7 @@ class EventBus:
                 if event_class in self._subscribers:
                     subscribers.extend(self._subscribers[event_class])
             
-            self._logger.debug(f"📢 Publishing {event.__class__.__name__} to {len(subscribers)} subscribers")
+            self._logger.debug(f"📢 Publishing {event.__class__.__name__} to {len(subscribers)} subscribers {event}")
             
             # Notify all subscribers
             for callback in subscribers:

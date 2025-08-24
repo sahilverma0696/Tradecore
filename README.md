@@ -163,28 +163,25 @@ python3 -m unittest tests.test_thread_manager_stress.TestThreadManagerStress.tes
 
 ## 🔧 Configuration
 
-### Thread Pool Configuration (system_config.json)
+For comprehensive configuration options, see **[CONFIG_OPTIONS.md](CONFIG_OPTIONS.md)** - Complete reference of all available settings.
+
+### Quick Configuration Examples
+
+#### Basic Offline Testing Setup
 ```json
+// system_config.json
 {
   "threading": {
     "event_bus_workers": 2,
     "streamer_workers": 4,
-    "strategy_workers": 2,
-    "executor_workers": 2,
-    "system_workers": 2
+    "strategy_workers": 2
   },
-  "streamer": {
-    "type": "offline",
-    "async_enabled": true
-  },
-  "executor": {
-    "type": "mock"
-  }
+  "streamer": {"type": "offline"},
+  "executor": {"type": "mock"},
+  "logging": {"console_output": true}
 }
-```
 
-### Trading Configuration (trading_config.json)
-```json
+// trading_config.json  
 {
   "symbols": ["260105"],
   "name_symbol": "NIFTY_50",
@@ -194,50 +191,68 @@ python3 -m unittest tests.test_thread_manager_stress.TestThreadManagerStress.tes
 }
 ```
 
-## 📊 Performance Metrics
+#### Live Trading Setup
+```json
+// system_config.json
+{
+  "streamer": {"type": "zerodha", "async_enabled": true},
+  "executor": {"type": "zerodha"},
+  "logging": {"level": "INFO", "console_output": true}
+}
 
-The system supports comprehensive performance monitoring:
-
-- **Thread Pool Statistics**: Active/completed/failed task counts
-- **Event Bus Metrics**: Event throughput and processing latency
-- **Memory Usage**: Real-time memory consumption tracking
-- **Latency Distribution**: Task execution timing analysis
-
-View metrics via the CLI dashboard or programmatically through the ThreadManager API.
-
-## 🔄 Development Workflow
-
-1. **Make Changes**: Edit components following the factory pattern
-2. **Run Unit Tests**: Test individual components in isolation
-3. **Run Integration Tests**: Test component interactions
-4. **Run Performance Tests**: Ensure no performance regressions
-5. **Run Stress Tests**: Verify system stability under load
-
-## 📁 Project Structure
-
+// trading_config.json
+{
+  "symbols": ["260105"],
+  "api_key": "your_api_key",
+  "api_secret": "your_api_secret",
+  "paper_trade": false,
+  "risk_management": {
+    "max_daily_loss": 50000,
+    "max_daily_trades": 50
+  }
+}
 ```
-src/
-├── main.py                     # Entry point with thread pool initialization
-├── core/
-│   ├── thread_manager.py      # Centralized thread pool management
-│   ├── event_bus/             # Event-driven communication
-│   ├── executors/             # Order execution layer
-│   └── streamer/              # Market data streaming
-├── strategies/                # Trading strategies
-└── cli/                      # Command-line interface
 
-tests/
-├── test_thread_manager*.py    # Thread manager test suite
-├── test_event_bus.py         # Event system tests
-└── test_*_factory.py         # Factory pattern tests
+### Configuration Files Overview
+
+- **`system_config.json`**: Thread pools, streamers, executors, logging, performance settings
+- **`trading_config.json`**: Symbols, strategies, risk management, API credentials, exit rules
+- **`CONFIG_OPTIONS.md`**: Complete reference with all available options and examples
+
+## 📊 Performance Monitoring
+
+The system provides real-time monitoring through:
+
+- **Thread Pool Statistics**: Monitor active/completed/failed tasks across all pools
+- **Console Logging**: Real-time system status with configurable verbosity
+- **Event Bus Metrics**: Track event throughput and processing latency
+- **Memory Usage**: Monitor memory consumption under load
+- **Component Health**: Check status of streamers, strategies, and executors
+
+### Monitoring Commands
+```bash
+# Enable console logging for real-time monitoring
+# Set "logging.console_output": true in system_config.json
+
+# View thread pool statistics programmatically
+python3 -c "
+from src.core.thread_manager import ThreadManager
+tm = ThreadManager()
+tm.initialize_pools()
+print(tm.get_pool_stats())
+"
+
+# Monitor system with CLI dashboard
+python3 -m src.cli.cli_main
 ```
 
 ## 🚨 Important Notes
 
-- **Thread Safety**: All components are designed for concurrent access
+- **Thread Safety**: All components designed for concurrent access via ThreadManager
 - **Event-Driven**: Use EventBus for all inter-component communication
 - **Factory Pattern**: Always use factories for component creation
 - **Configuration-Driven**: System behavior controlled via JSON configs
+- **Console Logging**: Enable `console_output: true` for real-time monitoring
 - **Testing**: Comprehensive test coverage ensures system reliability
 
-For detailed architectural information, see [LLM_README.md](LLM_README.md).
+For detailed architectural information and development guidelines, see **[LLM_README.md](LLM_README.md)**.

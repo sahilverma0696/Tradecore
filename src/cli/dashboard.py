@@ -47,7 +47,8 @@ class TradingDashboard(Subscriber):
             'ltp': event.ltp,
             'volume': event.volume,
             'change': event.change,
-            'timestamp': event.timestamp
+            'timestamp': event.timestamp,
+            'source': event.source
         }
         self.system_stats['quotes_received'] += 1
         
@@ -57,6 +58,12 @@ class TradingDashboard(Subscriber):
             pos['current_ltp'] = event.ltp
             pos['last_update'] = event.timestamp
             self._calculate_pnl(event.symbol)
+        
+        # Log live market data to console for debugging
+        if hasattr(event, 'raw_data') and event.raw_data.get('stream_type') == 'markPrice':
+            mark_price = event.raw_data.get('mark_price', event.ltp)
+            index_price = event.raw_data.get('index_price', 0)
+            self._logger.debug(f"Live market data: {event.symbol} Mark=${mark_price:.2f} Index=${index_price:.2f}")
 
     def _on_candle_generated(self, event: CandleGenerated):
         """Handle candle generated events."""
@@ -308,22 +315,50 @@ class TradingDashboard(Subscriber):
             self.running = False
 
     def _print_simple_dashboard(self):
-        """Print simple dashboard to console."""
+        """Print simple dashboard to console with enhanced live data display."""
         os.system('clear' if os.name == 'posix' else 'cls')
         
         print("=" * 80)
-        print(f"VWAP Trading Dashboard - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        print(f"📊 VWAP Trading Dashboard - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
         print("=" * 80)
         
         # System Stats
         uptime = datetime.now() - self.start_time
-        print(f"Uptime: {uptime} | Quotes: {self.system_stats['quotes_received']} | "
-              f"Candles: {self.system_stats['candles_generated']} | "
-              f"Total P&L: ${self.system_stats['total_pnl']:.2f}")
+        print(f"⏱️  Uptime: {uptime} | 📈 Quotes: {self.system_stats['quotes_received']} | "
+              f"🕯️  Candles: {self.system_stats['candles_generated']} | "
+              f"💰 Total P&L: ${self.system_stats['total_pnl']:.2f}")
+        print()
+        
+        # Live Market Data (Enhanced)
+        print("🌐 LIVE MARKET DATA:")
+        print("-" * 80)
+        if self.recent_quotes:
+            print(f"{'Symbol':<12} {'Price':<12} {'Source':<15} {'Volume':<10} {'Time':<10} {'Status'}")
+            print("-" * 80)
+            for symbol, quote in list(self.recent_quotes.items())[-10:]:  # Show last 10 quotes
+                price_str = f"${quote['ltp']:.2f}"
+                volume_str = f"{quote['volume']:,}" if quote['volume'] > 0 else "N/A"
+                time_str = quote['timestamp'].strftime('%H:%M:%S')
+                source_str = quote.get('source', 'Unknown')[:14]
+                
+                # Add status indicator for recent data
+                age = (datetime.now() - quote['timestamp']).total_seconds()
+                if age < 5:
+                    status = "🟢 LIVE"
+                elif age < 30:
+                    status = "🟡 RECENT"
+                else:
+                    status = "🔴 STALE"
+                
+                print(f"{symbol:<12} {price_str:<12} {source_str:<15} {volume_str:<10} {time_str:<10} {status}")
+        else:
+            print("No market data received yet...")
+            print("💡 Make sure the streamer is running and publishing quote events")
+        
         print()
         
         # Active Positions
-        print("ACTIVE POSITIONS:")
+        print("📋 ACTIVE POSITIONS:")
         print("-" * 80)
         if self.active_positions:
             print(f"{'Symbol':<10} {'Side':<4} {'Entry':<8} {'Current':<8} {'P&L':<8} {'P&L%':<6} {'Status':<8}")
@@ -337,17 +372,21 @@ class TradingDashboard(Subscriber):
         
         print()
         
-        # Recent Quotes
-        print("RECENT QUOTES:")
-        print("-" * 80)
-        for symbol, quote in list(self.recent_quotes.items())[-5:]:
-            change_indicator = "🟢" if quote['change'] >= 0 else "🔴"
-            print(f"{symbol:<10} LTP: {quote['ltp']:<8.2f} Change: {quote['change']:<6.2f}% "
-                  f"{quote['timestamp'].strftime('%H:%M:%S')} {change_indicator}")
+        # Recent Signals
+        if self.recent_signals:
+            print("📡 RECENT SIGNALS:")
+            print("-" * 80)
+            for signal in self.recent_signals[-5:]:  # Show last 5 signals
+                signal_time = signal['timestamp'].strftime('%H:%M:%S')
+                signal_type = signal['type']
+                symbol = signal['symbol']
+                price = signal['price']
+                
+                signal_indicator = "🔵" if signal_type == 'ENTRY' else "🔴"
+                print(f"{signal_time} {signal_indicator} {signal_type} {symbol} @ ${price:.2f}")
+            print()
         
-        print()
-        print("Press Ctrl+C to exit")
-
+        print("💡 Commands: --demo (demo data) | --live (live system) | Ctrl+C (exit)")
 
 def start_dashboard(use_curses=True):
     """Start the trading dashboard."""

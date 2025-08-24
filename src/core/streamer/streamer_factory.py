@@ -86,9 +86,16 @@ class StreamerFactory:
                                 config: Dict[str, Any]):
         """Create Binance streamer with specific configuration."""
         str_symbols = [str(s) for s in symbols]
+        
+        # Pass all relevant config parameters to BinanceStreamer
         return streamer_class(
             symbols=str_symbols,
-            **config
+            name_symbol=config.get('name_symbol', 'CRYPTO'),
+            reconnect_attempts=config.get('reconnect_attempts', 3),
+            reconnect_delay=config.get('reconnect_delay', 5.0),
+            stream_timeout=config.get('stream_timeout', 60),
+            ping_interval=config.get('ping_interval', 180),
+            testnet=config.get('testnet', False)
         )
     
     @classmethod
@@ -123,13 +130,21 @@ def _register_built_in_streamers():
     except ImportError as e:
         logger.debug(f"ZerodhaStreamer not available: {e}")
     
-    # Register Binance streamer (if available)
+    # Register Binance streamer (from core.streamer directory)
     try:
-        from src.market.binance.binance_streamer import BinanceStreamer
+        from .binance_streamer import BinanceStreamer
         StreamerFactory.register_streamer('binance', BinanceStreamer)
         logger.info("Registered BinanceStreamer")
     except ImportError as e:
         logger.debug(f"BinanceStreamer not available: {e}")
+    
+    # Register Upstox streamer (if available)
+    try:
+        from src.market.upstox.upstox_streamer import UpstoxStreamer
+        StreamerFactory.register_streamer('upstox', UpstoxStreamer)
+        logger.info("Registered UpstoxStreamer")
+    except ImportError as e:
+        logger.debug(f"UpstoxStreamer not available: {e}")
 
 
 # Auto-register built-in streamers when module is imported

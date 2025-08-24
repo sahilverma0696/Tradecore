@@ -13,7 +13,7 @@ class OfflineStreamer(BaseStreamer):
     Uses the simplified BaseStreamer interface.
     """
     
-    def __init__(self, symbols: List[str], base_price: float = 18500.0, tick_interval: float = 1.0):
+    def __init__(self, symbols: List[str], base_price: float = 1337.0, tick_interval: float = 1.0):
         super().__init__(symbols, name="OfflineStreamer")
         self.base_price = base_price
         self.tick_interval = tick_interval

@@ -8,7 +8,8 @@ import traceback
 
 import pandas as pd
 # from src.core.plotting.live_chart_server import LiveChartServer
-from src.core.event_bus import Publisher, Subscriber, QuoteEvent, CandleGenerated
+from src.core.event_bus.mixins import Publisher, Subscriber
+from src.core.event_bus.events import QuoteEvent, CandleGenerated
 
 DATA_CANDLE_DIR = "data/candles"
 DATA_GRAPH_DIR = "data/graphs"

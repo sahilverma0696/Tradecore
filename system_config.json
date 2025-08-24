@@ -1,4 +1,8 @@
 {
+  "system": {
+    "mode": "offline",
+    "description": "System operation mode: 'live' or 'offline'"
+  },
   "logging": {
     "level": "INFO",
     "format": "%(asctime)s - %(name)s - %(levelname)s - %(message)s",
@@ -25,6 +29,47 @@
     "strategy_workers": 2,
     "executor_workers": 2,
     "system_workers": 2
+  },
+  "streamer": {
+    "type": "binance",
+    "async_enabled": true,
+    "config": {
+      "offline": {
+        "data_dir": "data",
+        "playback_speed": 1.0,
+        "tick_interval": 1.0,
+        "base_price": 18500.0,
+        "async_mode": true
+      },
+      "binance": {
+        "reconnect_attempts": 5,
+        "reconnect_delay": 10.0,
+        "stream_timeout": 60,
+        "ping_interval": 180,
+        "testnet": false,
+        "stream_type": "markPrice",
+        "name_symbol": "CRYPTO_FUTURES",
+        "interval": "1m"
+      }
+    }
+  },
+  "executor": {
+    "type": "mock",
+    "config": {
+      "mock": {
+        "slippage_factor": 0.0001,
+        "execution_delay": 0.1,
+        "initial_cash": 100000.0
+      },
+      "binance": {
+        "order_type": "MARKET",
+        "time_in_force": "GTC",
+        "test_mode": true,
+        "recv_window": 5000,
+        "timeout": 30,
+        "max_retries": 3
+      }
+    }
   },
   "performance": {
     "enable_profiling": false,
@@ -90,28 +135,6 @@
     "buffer_size": 1024,
     "enable_compression": false
   },
-  "streamer": {
-    "type": "offline",
-    "async_enabled": true,
-    "config": {
-      "offline": {
-        "tick_interval": 1.0,
-        "base_price": 18500.0,
-        "async_mode": true
-      }
-    }
-  },
-  "executor": {
-    "type": "mock",
-    "async_enabled": false,
-    "config": {
-      "mock": {
-        "slippage_factor": 0.0001,
-        "execution_delay": 0.1,
-        "initial_cash": 100000.0
-      }
-    }
-  },
   "trading_session": {
     "market_hours": {
       "start_time": "09:15",
@@ -124,19 +147,10 @@
     "holiday_check": true
   },
   "data_sources": {
-    "primary_streamer": "zerodha",
-    "backup_streamers": ["binance"],
-    "data_redundancy": true,
+    "primary_streamer": "offline",
+    "backup_streamers": ["zerodha"],
+    "data_redundancy": false,
     "cross_validation": false,
     "price_tolerance_percent": 0.1
   }
-}
-  "data_sources": {
-    "primary_streamer": "zerodha",
-    "backup_streamers": ["binance"],
-    "data_redundancy": true,
-    "cross_validation": false,
-    "price_tolerance_percent": 0.1
-  }
-}
 }
