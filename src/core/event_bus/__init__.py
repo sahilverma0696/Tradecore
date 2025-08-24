@@ -1,6 +1,6 @@
 from .events import (
     Event, 
-    QuoteReceived, 
+    QuoteEvent, 
     CandleGenerated,
     EntrySignal,
     ExitSignal,
@@ -13,7 +13,7 @@ from .event_bus import EventBus
 
 __all__ = [
     'Event',
-    'QuoteReceived', 
+    'QuoteEvent', 
     'CandleGenerated',
     'EntrySignal', 
     'ExitSignal',

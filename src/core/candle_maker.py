@@ -2,13 +2,13 @@
 from typing import List
 from datetime import datetime, timedelta
 
-from src.core.event_bus import Subscriber, Publisher, QuoteReceived, CandleGenerated
+from src.core.event_bus import Subscriber, Publisher, QuoteEvent, CandleGenerated
 from src.logger_factory import get_logger
 
 class CandleMaker(Subscriber, Publisher):
     """
     Converts real-time quotes into OHLCV candles with VWAP calculation.
-    Subscribes to QuoteReceived events and publishes CandleGenerated events.
+    Subscribes to QuoteEvent events and publishes CandleGenerated events.
     """
     
     def __init__(self, timeframe: str = "5min"):
@@ -24,9 +24,9 @@ class CandleMaker(Subscriber, Publisher):
         # Timeframe settings
         self.timeframe_delta = self._parse_timeframe(timeframe)
         
-        # Subscribe to QuoteReceived events - CRITICAL for receiving market data
-        self.subscribe_to_event(QuoteReceived, self.on_quote_received)
-        self.logger.info(f"✅ CandleMaker subscribed to QuoteReceived events")
+        # Subscribe to QuoteEvent events - CRITICAL for receiving market data
+        self.subscribe_to_event(QuoteEvent, self.on_quote_received)
+        self.logger.info(f"✅ CandleMaker subscribed to QuoteEvent events")
         
     def _parse_timeframe(self, timeframe: str) -> timedelta:
         """Parse the timeframe string and return a timedelta object."""
@@ -48,7 +48,7 @@ class CandleMaker(Subscriber, Publisher):
             self.logger.error(f"Error parsing timeframe '{timeframe}': {e}")
             raise
     
-    def on_quote_received(self, event: QuoteReceived):
+    def on_quote_received(self, event: QuoteEvent):
         """Handle incoming quote events and build candles."""
         try:
             self.logger.info(f"📊 Received quote for {event.symbol}: LTP={event.ltp}, Volume={event.volume}")

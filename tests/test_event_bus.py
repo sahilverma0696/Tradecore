@@ -6,7 +6,7 @@ from unittest.mock import Mock, patch
 
 from src.core.event_bus import (
     EventBus, Event, CandleGenerated, 
-    EntrySignal, ExitSignal, Publisher, Subscriber, QuoteReceived
+    EntrySignal, ExitSignal, Publisher, Subscriber, QuoteEvent
 )
 
 
@@ -102,7 +102,7 @@ class TestEventBus(unittest.TestCase):
         """Test event history functionality."""
         # Publish some events
         event1 = TestEvent("event1")
-        event2 = QuoteReceived(
+        event2 = QuoteEvent(
             timestamp=datetime.now(),
             source="test",
             symbol="TEST",
@@ -129,7 +129,7 @@ class TestEventBus(unittest.TestCase):
         # Get limited history
         limited = self.event_bus.get_event_history(limit=1)
         self.assertEqual(len(limited), 1)
-        self.assertIsInstance(limited[0], QuoteReceived)
+        self.assertIsInstance(limited[0], QuoteEvent)
     
     def test_max_history_limit(self):
         """Test that event history respects max limit."""
@@ -228,11 +228,11 @@ class TestEventBus(unittest.TestCase):
         
         # Add subscribers
         self.event_bus.subscribe(TestEvent, handler)
-        self.event_bus.subscribe(QuoteReceived, handler)
+        self.event_bus.subscribe(QuoteEvent, handler)
         
         event_types = self.event_bus.list_event_types()
         self.assertIn('TestEvent', event_types)
-        self.assertIn('QuoteReceived', event_types)
+        self.assertIn('QuoteEvent', event_types)
         self.assertEqual(len(event_types), 2)
 
 
@@ -313,7 +313,7 @@ class TestSubscriberMixin(unittest.TestCase):
                 super().__init__()
                 self.received_events = []
                 self.subscribe_to_event(TestEvent, self.handle_test_event)
-                self.subscribe_to_event(QuoteReceived, self.handle_quote_event)
+                self.subscribe_to_event(QuoteEvent, self.handle_quote_event)
             
             def handle_test_event(self, event):
                 self.received_events.append(event)
@@ -332,7 +332,7 @@ class TestSubscriberMixin(unittest.TestCase):
         
         # Publish events after unsubscribe
         event_bus.publish(TestEvent("after unsubscribe"))
-        event_bus.publish(QuoteReceived(
+        event_bus.publish(QuoteEvent(
             timestamp=datetime.now(),
             source="test",
             symbol="TEST",
@@ -353,8 +353,8 @@ class TestTradingEvents(unittest.TestCase):
     """Test trading-specific events."""
     
     def test_quote_received_creation(self):
-        """Test QuoteReceived event creation."""
-        quote_event = QuoteReceived(
+        """Test QuoteEvent event creation."""
+        quote_event = QuoteEvent(
             timestamp=datetime.now(),
             source="ZerodhaStreamer",
             symbol="NIFTY",
@@ -414,14 +414,14 @@ class TestEventIntegration(unittest.TestCase):
             workflow_events.append(event.__class__.__name__)
         
         # Subscribe to all event types
-        self.event_bus.subscribe(QuoteReceived, track_events)
+        self.event_bus.subscribe(QuoteEvent, track_events)
         self.event_bus.subscribe(CandleGenerated, track_events)
         self.event_bus.subscribe(EntrySignal, track_events)
         self.event_bus.subscribe(ExitSignal, track_events)
         
         # Simulate trading workflow
         # 1. Quote received
-        quote = QuoteReceived(
+        quote = QuoteEvent(
             timestamp=datetime.now(),
             source="Streamer",
             symbol="TEST",
@@ -471,7 +471,7 @@ class TestEventIntegration(unittest.TestCase):
         
         # Verify workflow
         expected_flow = [
-            "QuoteReceived",
+            "QuoteEvent",
             "CandleGenerated", 
             "EntrySignal",
             "ExitSignal"
@@ -482,7 +482,7 @@ class TestEventIntegration(unittest.TestCase):
 if __name__ == "__main__":
     unittest.main()
     expected_flow = [
-        "QuoteReceived",
+        "QuoteEvent",
         "CandleGenerated", 
         "EntrySignal",
         "ExitSignal"

@@ -162,7 +162,7 @@ def create_and_register_components(system_config, trading_config):
         # Log subscription status
         logger.info("📢 Event subscription summary:")
         event_bus = EventBus()
-        logger.info(f"   QuoteReceived subscribers: {len(event_bus._subscribers.get('QuoteReceived', []))}")
+        logger.info(f"   QuoteEvent subscribers: {len(event_bus._subscribers.get('QuoteEvent', []))}")
         logger.info(f"   CandleGenerated subscribers: {len(event_bus._subscribers.get('CandleGenerated', []))}")
         logger.info(f"   EntrySignal subscribers: {len(event_bus._subscribers.get('EntrySignal', []))}")
         logger.info(f"   ExitSignal subscribers: {len(event_bus._subscribers.get('ExitSignal', []))}")

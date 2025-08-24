@@ -266,7 +266,7 @@ class MarketDataProcessor(Publisher):
         
     def publish_quote(self, quote_data):
         def _publish_task():
-            event = QuoteReceived(...)
+            event = QuoteEvent(...)
             self.publish_event(event)
         
         self.thread_manager.submit_task(ThreadPoolType.EVENT_BUS, _publish_task)
@@ -274,7 +274,7 @@ class MarketDataProcessor(Publisher):
 # ❌ WRONG - Direct event publishing without thread pool
 class BadProcessor(Publisher):
     def publish_quote(self, quote_data):
-        event = QuoteReceived(...)
+        event = QuoteEvent(...)
         self.publish_event(event)  # Blocks calling thread
 ```
 

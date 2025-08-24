@@ -5,7 +5,7 @@ import random
 import threading
 from datetime import datetime, timedelta
 
-from src.core.event_bus import EventBus, QuoteReceived, CandleGenerated, EntrySignal, ExitSignal, OrderExecuted
+from src.core.event_bus import EventBus, QuoteEvent, CandleGenerated, EntrySignal, ExitSignal, OrderExecuted
 from src.logger_factory import get_logger
 
 
@@ -51,7 +51,7 @@ class DemoDataGenerator:
                 new_price = self.current_prices[symbol] * (1 + change_pct)
                 self.current_prices[symbol] = new_price
                 
-                quote_event = QuoteReceived(
+                quote_event = QuoteEvent(
                     timestamp=datetime.now(),
                     source="DemoStreamer",
                     symbol=symbol,

@@ -15,7 +15,7 @@ This system is built on a **thread-managed event-driven architecture** with the 
 ### Event-Driven Communication
 - **EventBus**: Singleton message broker for all inter-component communication
 - **Publisher/Subscriber Pattern**: Components inherit from mixins for event handling
-- **Typed Events**: Strongly typed event system for reliable communication
+- **Typed Events**: Strongly typed event system (QuoteEvent, CandleGenerated, etc.)
 
 ### Factory Pattern Components
 - **Dynamic Creation**: Components created based on configuration files

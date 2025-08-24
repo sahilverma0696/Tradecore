@@ -7,7 +7,7 @@ from typing import Dict, List
 import curses
 from collections import defaultdict
 
-from src.core.event_bus import EventBus, Subscriber, QuoteReceived, CandleGenerated, EntrySignal, ExitSignal, OrderExecuted
+from src.core.event_bus import EventBus, Subscriber, QuoteEvent, CandleGenerated, EntrySignal, ExitSignal, OrderExecuted
 from src.logger_factory import get_logger
 
 
@@ -33,7 +33,7 @@ class TradingDashboard(Subscriber):
         self.running = False
         
         # Subscribe to all relevant events
-        self.subscribe_to_event(QuoteReceived, self._on_quote_received)
+        self.subscribe_to_event(QuoteEvent, self._on_quote_received)
         self.subscribe_to_event(CandleGenerated, self._on_candle_generated)
         self.subscribe_to_event(EntrySignal, self._on_entry_signal)
         self.subscribe_to_event(ExitSignal, self._on_exit_signal)
@@ -41,7 +41,7 @@ class TradingDashboard(Subscriber):
         
         self._logger.info("TradingDashboard initialized")
 
-    def _on_quote_received(self, event: QuoteReceived):
+    def _on_quote_received(self, event: QuoteEvent):
         """Handle quote received events."""
         self.recent_quotes[event.symbol] = {
             'ltp': event.ltp,

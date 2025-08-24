@@ -5,7 +5,7 @@ import asyncio
 from datetime import datetime
 
 from src.logger_factory import get_logger
-from src.core.event_bus import Publisher, QuoteReceived
+from src.core.event_bus import Publisher, QuoteEvent
 from src.core.thread_manager import ThreadManager, ThreadPoolType
 
 
@@ -138,16 +138,17 @@ class BaseStreamer(Publisher, ABC):
     
     def publish_quote(self, event):
         """
-        Publish a normalized quote as QuoteReceived event using event bus thread pool.
+        Publish a normalized quote as QuoteEvent using event bus thread pool.
         """
         def _publish_quote_task():
             try:
-                
                 self.publish_event(event)
-                self._logger.debug(f"Published quote for {event.symbol}: LTP={event.ltp}, Volume={event.volume}")
+                # Use correct attribute names for QuoteEvent
+                self._logger.debug(f"Published quote for {event.instrument}: LTP={event.ltp}, LTQ={event.ltq}")
 
             except Exception as e:
-                self._logger.error(f"Error publishing quote for {event.symbol}: {e}")
+                # Use correct attribute names for QuoteEvent
+                self._logger.error(f"Error publishing quote for {getattr(event, 'instrument', 'unknown')}: {e}")
 
         # Submit quote publishing to event bus thread pool
         self._thread_manager.submit_task(ThreadPoolType.EVENT_BUS, _publish_quote_task)
@@ -156,21 +157,18 @@ class BaseStreamer(Publisher, ABC):
                                  bid: float = 0, ask: float = 0, raw_data: Dict[str, Any] = None):
         """Async version of quote publishing."""
         try:
-            quote_event = QuoteReceived(
+            quote_event = QuoteEvent(
                 timestamp=datetime.now(),
                 source=self.name,
-                symbol=symbol,
-                instrument=hash(symbol),
+                instrument=symbol,
+                name=symbol,
                 ltp=ltp,
-                volume=volume,
-                last_quantity=volume,
-                change=0.0,
-                raw_data=raw_data or {}
+                ltq=volume
             )
             
             # Publish in current event loop
             self.publish_event(quote_event)
-            self._logger.debug(f"Published quote async for {symbol}: LTP={ltp}, Volume={volume}")
+            self._logger.debug(f"Published quote async for {symbol}: LTP={ltp}, LTQ={volume}")
             
         except Exception as e:
             self._logger.error(f"Error publishing quote async for {symbol}: {e}")
@@ -203,13 +201,15 @@ class BaseStreamer(Publisher, ABC):
         pass
 
     @abstractmethod
-    def _normalize_raw_data(self, raw_data: Dict[str, Any], symbol: str) -> QuoteReceived:
-        """Normalize raw data to QuoteReceived event."""
+    def _normalize_raw_data(self, raw_data: Dict[str, Any], symbol: str) -> QuoteEvent:
+        """Normalize raw data to QuoteEvent event."""
         pass
     
     
     # Optional async methods - subclasses can implement these
     async def _run_connection_async(self):
         """Optional async version of connection loop."""
+        # Default implementation runs sync version in executor
+        await asyncio.get_event_loop().run_in_executor(None, self._run_connection)
         # Default implementation runs sync version in executor
         await asyncio.get_event_loop().run_in_executor(None, self._run_connection)
