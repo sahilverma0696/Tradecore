@@ -21,6 +21,7 @@ class TradingDashboard:
         self.recent_quotes = {}
         self.recent_candles = {}
         self.recent_signals = []
+        self.active_positions = {}  # Add missing attribute
         self.system_stats = {
             'quotes_received': 0,
             'candles_generated': 0,
@@ -140,6 +141,10 @@ class TradingDashboard:
 
     def _draw_dashboard(self, stdscr):
         """Draw the dashboard interface."""
+        # Read latest data from IPC files FIRST
+        self._read_live_quotes()
+        self._read_live_events()
+        
         height, width = stdscr.getmaxyx()
         row = 0
         
@@ -160,6 +165,15 @@ class TradingDashboard:
             stdscr.addstr(row, 0, stats_line[:width-1])
         row += 2
         
+        # Debug: Show IPC file status
+        quote_file_exists = os.path.exists(self._quote_file)
+        event_file_exists = os.path.exists(self._event_file)
+        
+        if row < height:
+            ipc_status = f"IPC Files: Quotes={quote_file_exists} Events={event_file_exists} Count={len(self.recent_quotes)}"
+            stdscr.addstr(row, 0, ipc_status[:width-1], curses.color_pair(4))
+        row += 1
+        
         # Live Market Data Header - Show Symbol, LTP, LTQ
         if row < height:
             stdscr.addstr(row, 0, "LIVE MARKET DATA", curses.A_BOLD)
@@ -170,34 +184,35 @@ class TradingDashboard:
             stdscr.addstr(row, 0, header[:width-1], curses.A_UNDERLINE)
         row += 1
         
-        # Live Market Data
-        for symbol, quote in list(self.recent_quotes.items())[-8:]:  # Show last 8 quotes
-            if row >= height - 15:  # Leave space for other sections
-                break
+        # Live Market Data - Show all quotes
+        if self.recent_quotes:
+            for symbol, quote in self.recent_quotes.items():
+                if row >= height - 10:  # Leave space for other sections
+                    break
+                    
+                # Calculate data freshness
+                age = (datetime.now() - quote['timestamp']).total_seconds()
+                if age < 5:
+                    color = curses.color_pair(1)  # Green for fresh
+                    status = "LIVE"
+                elif age < 30:
+                    color = curses.color_pair(3)  # Yellow for recent
+                    status = "OK"
+                else:
+                    color = curses.color_pair(2)  # Red for stale
+                    status = "STALE"
                 
-            # Calculate data freshness
-            age = (datetime.now() - quote['timestamp']).total_seconds()
-            if age < 5:
-                color = curses.color_pair(1)  # Green for fresh
-                status = "LIVE"
-            elif age < 30:
-                color = curses.color_pair(3)  # Yellow for recent
-                status = "OK"
-            else:
-                color = curses.color_pair(2)  # Red for stale
-                status = "STALE"
-            
-            time_str = quote['timestamp'].strftime('%H:%M:%S')
-            
-            quote_line = f"{symbol:<12} {quote['ltp']:<10.2f} {quote['ltq']:<10.4f} " \
-                        f"{quote['source'][:11]:<12} {time_str:<8} {status:<6}"
-            
+                time_str = quote['timestamp'].strftime('%H:%M:%S')
+                
+                quote_line = f"{symbol:<12} {quote['ltp']:<10.2f} {quote['ltq']:<10.4f} " \
+                            f"{quote['source'][:11]:<12} {time_str:<8} {status:<6}"
+                
+                if row < height:
+                    stdscr.addstr(row, 0, quote_line[:width-1], color)
+                row += 1
+        else:
             if row < height:
-                stdscr.addstr(row, 0, quote_line[:width-1], color)
-            row += 1
-        
-        if not self.recent_quotes and row < height:
-            stdscr.addstr(row, 0, "No market data - ensure main system is running", curses.color_pair(2))
+                stdscr.addstr(row, 0, "❌ No market data - check main system status", curses.color_pair(2))
             row += 1
         
         row += 1
@@ -212,21 +227,26 @@ class TradingDashboard:
             stdscr.addstr(row, 0, header[:width-1], curses.A_UNDERLINE)
         row += 1
         
-        # Active Positions
-        for symbol, pos in self.active_positions.items():
-            if row >= height - 5:  # Leave space for other sections
-                break
+        # Active Positions - now properly initialized
+        if self.active_positions:
+            for symbol, pos in self.active_positions.items():
+                if row >= height - 5:  # Leave space for other sections
+                    break
+                    
+                pnl_color = curses.color_pair(1) if pos['pnl_pct'] >= 0 else curses.color_pair(2)
+                time_str = pos['entry_time'].strftime('%H:%M:%S')
                 
-            pnl_color = curses.color_pair(1) if pos['pnl_pct'] >= 0 else curses.color_pair(2)
-            time_str = pos['entry_time'].strftime('%H:%M:%S')
-            
-            pos_line = f"{symbol:<10} {pos['side']:<4} {pos['entry_price']:<8.2f} " \
-                      f"{pos['current_ltp']:<8.2f} {pos['unrealized_pnl']:<8.2f} " \
-                      f"{pos['pnl_pct']:<6.1f} {pos['quantity']:<4} " \
-                      f"{pos['status']:<8} {time_str:<8}"
-            
+                pos_line = f"{symbol:<10} {pos['side']:<4} {pos['entry_price']:<8.2f} " \
+                          f"{pos['current_ltp']:<8.2f} {pos['unrealized_pnl']:<8.2f} " \
+                          f"{pos['pnl_pct']:<6.1f} {pos['quantity']:<4} " \
+                          f"{pos['status']:<8} {time_str:<8}"
+                
+                if row < height:
+                    stdscr.addstr(row, 0, pos_line[:width-1], pnl_color)
+                row += 1
+        else:
             if row < height:
-                stdscr.addstr(row, 0, pos_line[:width-1], pnl_color)
+                stdscr.addstr(row, 0, "No active positions", curses.color_pair(3))
             row += 1
         
         row += 1
@@ -236,25 +256,31 @@ class TradingDashboard:
             stdscr.addstr(row, 0, "RECENT SIGNALS", curses.A_BOLD)
         row += 1
         
-        for signal in self.recent_signals[-8:]:  # Last 8 signals
-            if row >= height - 2:
-                break
+        if self.recent_signals:
+            for signal in self.recent_signals[-8:]:  # Last 8 signals
+                if row >= height - 2:
+                    break
+                    
+                signal_line = f"{signal['timestamp'].strftime('%H:%M:%S')} " \
+                             f"{signal['type']:<5} {signal['symbol']:<10} " \
+                             f"{signal.get('side', 'N/A'):<4} @ {signal['price']:<8.2f}"
                 
-            signal_line = f"{signal['timestamp'].strftime('%H:%M:%S')} " \
-                         f"{signal['type']:<5} {signal['symbol']:<10} " \
-                         f"{signal.get('side', 'N/A'):<4} @ {signal['price']:<8.2f}"
-            
-            if 'reason' in signal:
-                signal_line += f" ({signal['reason']})"
-            
+                if 'reason' in signal:
+                    signal_line += f" ({signal['reason']})"
+                
+                if row < height:
+                    color = curses.color_pair(1) if signal['type'] == 'ENTRY' else curses.color_pair(2)
+                    stdscr.addstr(row, 0, signal_line[:width-1], color)
+                row += 1
+        else:
             if row < height:
-                color = curses.color_pair(1) if signal['type'] == 'ENTRY' else curses.color_pair(2)
-                stdscr.addstr(row, 0, signal_line[:width-1], color)
+                stdscr.addstr(row, 0, "No recent signals", curses.color_pair(3))
             row += 1
         
         # Help text
         if height > 10:
             help_text = "Press 'q' to quit"
+            stdscr.addstr(height-1, 0, help_text, curses.color_pair(4))
 
     def start_simple_dashboard(self):
         """Start a simple text-based dashboard (no curses)."""
@@ -289,14 +315,21 @@ class TradingDashboard:
               f"💰 Total P&L: ${self.system_stats['total_pnl']:.2f}")
         print()
         
-        # IPC Connection Status
+        # IPC Connection Status with more detail
         quote_file_exists = os.path.exists(self._quote_file)
         event_file_exists = os.path.exists(self._event_file)
         
-        if quote_file_exists or event_file_exists:
-            print("🔌 IPC Connection: ✅ Reading live data from main system")
-        else:
-            print("🔌 IPC Connection: ❌ No data files found")
+        print(f"🔌 IPC Status: Quotes File={quote_file_exists}, Events File={event_file_exists}")
+        print(f"📊 Data Loaded: {len(self.recent_quotes)} quotes, {len(self.recent_candles)} candles")
+        
+        # Debug: Show raw file contents if no quotes
+        if not self.recent_quotes and quote_file_exists:
+            try:
+                with open(self._quote_file, 'r') as f:
+                    raw_data = f.read()[:200]  # First 200 chars
+                print(f"🔍 Quote file preview: {raw_data}")
+            except:
+                print("🔍 Could not read quote file")
         print()
         
         # Live Market Data - Show Symbol, LTP, LTQ
@@ -305,7 +338,9 @@ class TradingDashboard:
         if self.recent_quotes:
             print(f"{'Symbol':<12} {'LTP':<12} {'LTQ':<12} {'Source':<15} {'Time':<10} {'Status'}")
             print("-" * 80)
-            for symbol, quote in list(self.recent_quotes.items())[-10:]:
+            
+            # Show ALL quotes, not just last 10
+            for symbol, quote in self.recent_quotes.items():
                 ltp_str = f"${quote['ltp']:.2f}"
                 ltq_str = f"{quote['ltq']:.4f}" if quote['ltq'] > 0 else "0.0000"
                 time_str = quote['timestamp'].strftime('%H:%M:%S')
@@ -323,11 +358,26 @@ class TradingDashboard:
                 print(f"{symbol:<12} {ltp_str:<12} {ltq_str:<12} {source_str:<15} {time_str:<10} {status}")
         else:
             print("❌ No market data available...")
-            print("💡 Troubleshooting steps:")
-            print("   1. Ensure main system is running: python3 -m src.main")
-            print("   2. Check if data/ directory exists and has live_quotes.json")
-            print("   3. Verify main system is publishing QuoteEvents")
-            print(f"   4. Files found: quotes={quote_file_exists}, events={event_file_exists}")
+            print("💡 Debug info:")
+            print(f"   Quote file exists: {quote_file_exists}")
+            print(f"   Event file exists: {event_file_exists}")
+            print(f"   Quote file path: {self._quote_file}")
+            print(f"   Recent quotes count: {len(self.recent_quotes)}")
+        
+        print()
+        
+        # Active Positions
+        print("📋 ACTIVE POSITIONS:")
+        print("-" * 80)
+        if self.active_positions:
+            print(f"{'Symbol':<10} {'Side':<4} {'Entry':<8} {'Current':<8} {'P&L':<8} {'P&L%':<6} {'Status':<8}")
+            for symbol, pos in self.active_positions.items():
+                pnl_indicator = "📈" if pos['pnl_pct'] >= 0 else "📉"
+                print(f"{symbol:<10} {pos['side']:<4} {pos['entry_price']:<8.2f} "
+                      f"{pos['current_ltp']:<8.2f} {pos['unrealized_pnl']:<8.2f} "
+                      f"{pos['pnl_pct']:<6.1f} {pos['status']:<8} {pnl_indicator}")
+        else:
+            print("No active positions")
         
         print()
         
@@ -341,6 +391,20 @@ class TradingDashboard:
                 print(f"{symbol:<12} {candle['open']:<8.2f} {candle['high']:<8.2f} "
                       f"{candle['low']:<8.2f} {candle['close']:<8.2f} {candle['volume']:<8.2f} "
                       f"{candle['vwap']:<8.2f}")
+            print()
+        
+        # Recent Signals
+        if self.recent_signals:
+            print("📡 RECENT SIGNALS:")
+            print("-" * 80)
+            for signal in self.recent_signals[-5:]:  # Show last 5 signals
+                signal_time = signal['timestamp'].strftime('%H:%M:%S')
+                signal_type = signal['type']
+                symbol = signal['symbol']
+                price = signal['price']
+                
+                signal_indicator = "🔵" if signal_type == 'ENTRY' else "🔴"
+                print(f"{signal_time} {signal_indicator} {signal_type} {symbol} @ ${price:.2f}")
             print()
         
         print("💡 Reading live data via IPC files | Press Ctrl+C to exit")
@@ -364,25 +428,6 @@ def start_dashboard(use_curses=True):
 
 if __name__ == "__main__":
     start_dashboard()
-        
-    # System Stats
-    uptime = datetime.now() - self.start_time
-    print(f"⏱️  Uptime: {uptime} | 📈 Quotes: {self.system_stats['quotes_received']} | "
-          f"🕯️  Candles: {self.system_stats['candles_generated']} | "
-          f"💰 Total P&L: ${self.system_stats['total_pnl']:.2f}")
-    print()
-    
-    # Connection Status Check
-    try:
-        quote_subscribers = len(self.event_bus._subscribers.get('QuoteEvent', []))
-        print(f"🔌 EventBus Connection: ✅ Active ({quote_subscribers} QuoteEvent subscribers)")
-    except:
-        print("🔌 EventBus Connection: ❌ Disconnected")
-    print()
-    
-    # Live Market Data - Show Symbol, LTP, LTQ
-    print("🌐 LIVE MARKET DATA:")
-    print("-" * 80)
     if self.recent_quotes:
         print(f"{'Symbol':<12} {'LTP':<12} {'LTQ':<12} {'Source':<15} {'Time':<10} {'Status'}")
         print("-" * 80)
@@ -442,23 +487,3 @@ if __name__ == "__main__":
         print()
     
     print("💡 Commands: --demo (demo data) | --live (live system) | Ctrl+C (exit)")
-
-def start_dashboard(use_curses=True):
-    """Start the trading dashboard."""
-    dashboard = TradingDashboard()
-    
-    if use_curses:
-        try:
-            dashboard.start_curses_dashboard()
-        except Exception as e:
-            print(f"Curses not available: {e}")
-            print("Falling back to simple dashboard...")
-            dashboard.start_simple_dashboard()
-    else:
-        dashboard.start_simple_dashboard()
-    
-    return dashboard
-
-
-if __name__ == "__main__":
-    start_dashboard()
