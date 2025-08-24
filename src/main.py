@@ -96,47 +96,47 @@ def create_and_register_components(system_config, trading_config):
         # Create core components first
         logger.info("Creating core components...")
         
-        # CandleMaker - subscribes to quotes, publishes candles
-        logger.info("   📊 Creating CandleMaker...")
-        components['candle_maker'] = CandleMaker()
-        logger.info("   ✅ CandleMaker registered for quote → candle conversion")
+        # # CandleMaker - subscribes to quotes, publishes candles
+        # logger.info("   📊 Creating CandleMaker...")
+        # components['candle_maker'] = CandleMaker()
+        # logger.info("   ✅ CandleMaker registered for quote → candle conversion")
         
-        # OrderManager - subscribes to signals, manages orders
-        logger.info("   📋 Creating OrderManager...")
-        components['order_manager'] = OrderManager()
-        logger.info("   ✅ OrderManager registered for order lifecycle management")
+        # # OrderManager - subscribes to signals, manages orders
+        # logger.info("   📋 Creating OrderManager...")
+        # components['order_manager'] = OrderManager()
+        # logger.info("   ✅ OrderManager registered for order lifecycle management")
         
-        # Create strategy components
-        logger.info("Creating strategy components...")
-        config = trading_config.get()
+        # # Create strategy components
+        # logger.info("Creating strategy components...")
+        # config = trading_config.get()
         
-        # VwapStrategy - subscribes to candles, publishes entry/exit signals
-        logger.info("   💡 Creating VwapStrategy...")
-        components['vwap_strategy'] = VwapStrategy(config=config)
-        logger.info("   ✅ VwapStrategy registered for candle → signal generation")
+        # # VwapStrategy - subscribes to candles, publishes entry/exit signals
+        # logger.info("   💡 Creating VwapStrategy...")
+        # components['vwap_strategy'] = VwapStrategy(config=config)
+        # logger.info("   ✅ VwapStrategy registered for candle → signal generation")
         
-        # ExitManager - works with OrderManager for exit decisions
-        logger.info("   🚪 Creating ExitManager...")
-        components['exit_manager'] = ExitManager(
-            exit_steps=config.get('exit_steps', []),
-            reterival_exit=config.get('reterival_exit', 0.01),
-            default_quantity=config.get('default_quantity', 75),
-            market_close=config.get('market_close_time')
-        )
-        logger.info("   ✅ ExitManager created for exit condition handling")
+        # # ExitManager - works with OrderManager for exit decisions
+        # logger.info("   🚪 Creating ExitManager...")
+        # components['exit_manager'] = ExitManager(
+        #     exit_steps=config.get('exit_steps', []),
+        #     reterival_exit=config.get('reterival_exit', 0.01),
+        #     default_quantity=config.get('default_quantity', 75),
+        #     market_close=config.get('market_close_time')
+        # )
+        # logger.info("   ✅ ExitManager created for exit condition handling")
         
-        # Create executor using factory
-        logger.info("Creating executor...")
-        exec_config = system_config.get_executioner_config()
-        exec_type = exec_config['type']
-        config_data = exec_config['config']
+        # # Create executor using factory
+        # logger.info("Creating executor...")
+        # exec_config = system_config.get_executioner_config()
+        # exec_type = exec_config['type']
+        # config_data = exec_config['config']
         
-        logger.info(f"   ⚡ Creating {exec_type} executor...")
-        components['executor'] = ExecutorFactory.create_executor(
-            broker=exec_type,
-            config=config_data
-        )
-        logger.info(f"   ✅ {exec_type} executor created for order execution")
+        # logger.info(f"   ⚡ Creating {exec_type} executor...")
+        # components['executor'] = ExecutorFactory.create_executor(
+        #     broker=exec_type,
+        #     config=config_data
+        # )
+        # logger.info(f"   ✅ {exec_type} executor created for order execution")
         
         # Create streamer using factory
         logger.info("Creating market data streamer...")
@@ -144,18 +144,12 @@ def create_and_register_components(system_config, trading_config):
         streamer_type = streamer_config['type']
         streamer_config_data = streamer_config['config']
         
-        # Get symbols based on streamer type
-        if streamer_type == 'binance':
-            # Get symbols from binance configuration section
-            binance_config = trading_config.get().get('binance', {})
-            symbols = binance_config.get('symbols', ['BTCUSDT'])
-            logger.info(f"Using Binance symbols: {symbols}")
-        else:
-            # Get symbols from main configuration for other streamers
-            symbols = trading_config.get().get('symbols', [])
-            
+        # Get symbols from main configuration for other streamers
+        symbols = trading_config.get().get('symbols')
         if not symbols:
-            raise ValueError("No symbols configured for streaming")
+            logger.error("No symbols configured for streaming. Sending exit signal.")
+            shutdown_event.set()
+            sys.exit(1)         # TODO: proper exit signal needed for graceful shutdown
         
         logger.info(f"   📡 Creating {streamer_type} streamer...")
         components['streamer'] = StreamerFactory.create_streamer(
@@ -185,6 +179,8 @@ def wire_component_dependencies(components):
     logger.info("🔗 Wiring component dependencies...")
     
     try:
+        ## Currently only wiring OrderManager, ExitManager, and Executor
+        ## need to change to event based communication later
         order_manager = components['order_manager']
         exit_manager = components['exit_manager']
         executor = components['executor']
@@ -211,7 +207,7 @@ def start_system_components(components, system_config):
         streamer = components['streamer']
         
         # Check if async streaming is enabled
-        async_enabled = system_config.get('streamer.async_enabled', False)
+        async_enabled = system_config.get('streamer.async_enabled', True)
         
         if async_enabled and hasattr(streamer, 'start_async'):
             logger.info("   🚀 Starting streamer with async support...")
@@ -321,14 +317,14 @@ def main():
         components = create_and_register_components(system_config, trading_config)
         
         # PHASE 4: Wire direct dependencies (non-event based)
-        wire_component_dependencies(components)
+        # wire_component_dependencies(components)
         
         # PHASE 5: Start all system components
         streaming_future = start_system_components(components, system_config)
         
-        logger.info("🎯 System initialization complete!")
-        logger.info("📊 All components operational and communicating via EventBus")
-        logger.info("🔄 Market data streaming and strategy processing active")
+        # logger.info("🎯 System initialization complete!")
+        # logger.info("📊 All components operational and communicating via EventBus")
+        # logger.info("🔄 Market data streaming and strategy processing active")
         
         # PHASE 6: Run monitoring loop
         run_monitoring_loop(components, thread_manager)

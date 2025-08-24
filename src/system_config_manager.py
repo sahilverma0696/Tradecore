@@ -70,7 +70,7 @@ class SystemConfigManager:
         
     def get_streamer_config(self) -> Dict[str, Any]:
         """Get streamer configuration."""
-        streamer_type = self.get('streamer.type', 'offline')
+        streamer_type = self.get('streamer.type', 'offline') # fallback to offline
         return {
             'type': streamer_type,
             'config': self.get(f'streamer.config.{streamer_type}', {})

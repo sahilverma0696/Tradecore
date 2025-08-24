@@ -90,7 +90,7 @@ class StreamerFactory:
         # Pass all relevant config parameters to BinanceStreamer
         return streamer_class(
             symbols=str_symbols,
-            name_symbol=config.get('name_symbol', 'CRYPTO'),
+            name_symbol=config.get('name_symbol'),
             reconnect_attempts=config.get('reconnect_attempts', 3),
             reconnect_delay=config.get('reconnect_delay', 5.0),
             stream_timeout=config.get('stream_timeout', 60),
@@ -124,7 +124,7 @@ def _register_built_in_streamers():
     
     # Register Zerodha streamer
     try:
-        from src.market.zerodha.zerodha_streamer import ZerodhaStreamer
+        from src.core.streamer.zerodha_streamer import ZerodhaStreamer
         StreamerFactory.register_streamer('zerodha', ZerodhaStreamer)
         logger.info("Registered ZerodhaStreamer")
     except ImportError as e:
@@ -132,7 +132,7 @@ def _register_built_in_streamers():
     
     # Register Binance streamer (from core.streamer directory)
     try:
-        from .binance_streamer import BinanceStreamer
+        from src.core.streamer.binance_streamer import BinanceStreamer
         StreamerFactory.register_streamer('binance', BinanceStreamer)
         logger.info("Registered BinanceStreamer")
     except ImportError as e:
@@ -140,7 +140,7 @@ def _register_built_in_streamers():
     
     # Register Upstox streamer (if available)
     try:
-        from src.market.upstox.upstox_streamer import UpstoxStreamer
+        from src.core.streamer.upstox_streamer import UpstoxStreamer
         StreamerFactory.register_streamer('upstox', UpstoxStreamer)
         logger.info("Registered UpstoxStreamer")
     except ImportError as e:

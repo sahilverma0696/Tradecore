@@ -1,6 +1,6 @@
 {
   "system": {
-    "mode": "offline",
+    "mode": "live",
     "description": "System operation mode: 'live' or 'offline'"
   },
   "logging": {
@@ -130,7 +130,7 @@
   },
   "streamers": {
     "reconnect_attempts": 5,
-    "reconnect_delay": 5.0,
+    "reconnect_delay": 2.0,
     "heartbeat_interval": 30,
     "buffer_size": 1024,
     "enable_compression": false
