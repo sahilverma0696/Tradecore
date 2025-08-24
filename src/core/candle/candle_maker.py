@@ -2,6 +2,7 @@
 import csv
 from datetime import datetime
 from collections import defaultdict
+from typing import Dict, Any  # Add missing imports
 from src.logger_factory import get_logger
 import os
 import traceback
@@ -25,6 +26,7 @@ class CandleMaker(Publisher, Subscriber):
         self._current: dict = {}
         self._vwap_data = defaultdict(lambda: {"cum_tp_vol": 0.0, "cum_vol": 0.0})
         self._logger = get_logger("CandleMaker")
+        self.timeframe = "5min"  # Add missing timeframe attribute
 
         # ensure header
         if not os.path.exists(self._csv_file):
@@ -38,76 +40,95 @@ class CandleMaker(Publisher, Subscriber):
         self.subscribe_to_event(QuoteEvent, self._on_quote_event)
 
     def _on_quote_event(self, event: QuoteEvent):
-        """Handle normalized quote events from event bus."""
-        self._logger.debug(f"Handling quote event: {event.symbol} @ {event.ltp}")
+        """Handle incoming quote events and build candles."""
+        self._logger.debug(f"Handling quote event: {event.instrument} @ {event.ltp}")
         
-        ts = event.timestamp
-        inst = event.instrument
-        name = event.symbol
-        ltp = event.ltp
-        vol = event.last_quantity or event.volume or 0
+        symbol = event.instrument
+        timestamp = event.timestamp
+        price = event.ltp
+        volume = event.ltq or 0
 
-        candle_time = ts.replace(second=0, microsecond=0)
+        candle_time = timestamp.replace(second=0, microsecond=0)
         candle_time = candle_time.replace(minute=(candle_time.minute // 5) * 5)
 
-        current = self._current.get(inst)
+        current = self._current.get(symbol)
 
         if current is None or current['timestamp'] != candle_time:
             if current:
-                self._logger.debug(f"Finalizing candle for {inst} at {current['timestamp']}")
-                self._finalize(inst, current)
-                self._logger.debug(f"Creating new candle for {inst} at {candle_time}")
+                self._logger.debug(f"Finalizing candle for {symbol} at {current['timestamp']}")
+                self._finalize(symbol, current)
+                self._logger.debug(f"Creating new candle for {symbol} at {candle_time}")
             current = {
                 'timestamp': candle_time,
-                'open': ltp,
-                'high': ltp,
-                'low': ltp,
-                'close': ltp,
-                'volume': vol,
-                'name': name,
+                'open': price,
+                'high': price,
+                'low': price,
+                'close': price,
+                'volume': volume,
+                'name': symbol,
             }
         else:
-            current['high'] = max(current['high'], ltp)
-            current['low'] = min(current['low'], ltp)
-            current['close'] = ltp
-            current['volume'] += vol
+            current['high'] = max(current['high'], price)
+            current['low'] = min(current['low'], price)
+            current['close'] = price
+            current['volume'] += volume
 
-        self._vwap_data[inst]['cum_tp_vol'] += ltp * vol
-        self._vwap_data[inst]['cum_vol'] += vol
-        self._current[inst] = current
+        # Calculate VWAP
+        self._vwap_data[symbol]['cum_tp_vol'] += price * volume
+        self._vwap_data[symbol]['cum_vol'] += volume
+        
+        if self._vwap_data[symbol]['cum_vol'] > 0:
+            current['vwap'] = self._vwap_data[symbol]['cum_tp_vol'] / self._vwap_data[symbol]['cum_vol']
+        else:
+            current['vwap'] = price
+            
+        self._current[symbol] = current
 
-    def _finalize(self, inst, candle):
-        cum_tp_vol = self._vwap_data[inst]['cum_tp_vol']
-        cum_vol = self._vwap_data[inst]['cum_vol']
-        vwap = round(cum_tp_vol / cum_vol, 2) if cum_vol else None
-        candle['vwap'] = vwap
+    def _finalize(self, symbol: str, candle: Dict[str, Any]):
+        """Finalize and publish a completed candle."""
+        try:
+            self._logger.debug(f"Finalizing candle for {symbol}: {candle}")
+            
+            # Create CandleGenerated event with correct parameter names
+            candle_event = CandleGenerated(
+                timestamp=candle['timestamp'],
+                symbol=symbol,
+                timeframe=self.timeframe,
+                open=candle['open'],
+                high=candle['high'],
+                low=candle['low'],
+                close=candle['close'],
+                volume=candle['volume'],
+                vwap=candle.get('vwap', 0.0)
+            )
+            
+            self.publish_event(candle_event)
+            self._logger.info(f"Published candle for {symbol}: O={candle['open']:.2f} H={candle['high']:.2f} L={candle['low']:.2f} C={candle['close']:.2f} V={candle['volume']:.2f}")
+            
+            # Write to CSV
+            self._write_to_csv(candle)
+            
+        except Exception as e:
+            self._logger.error(f"Error finalizing candle for {symbol}: {e}")
 
-        # Write to CSV
-        with open(self._csv_file, 'a', newline='') as f:
-            writer = csv.writer(f)
-            writer.writerow([
-                candle['timestamp'].isoformat(),
-                inst,
-                candle['name'],
-                candle['open'],
-                candle['high'],
-                candle['low'],
-                candle['close'],
-                candle['volume'],
-                vwap,
-            ])
-
-        self._logger.info(f"Finalized candle for {inst} at {candle['timestamp']} with VWAP {candle['vwap']}")
-
-        # Publish candle event to event bus
-        candle_event = CandleGenerated(
-            timestamp=candle['timestamp'],
-            source=self.__class__.__name__,
-            symbol=candle['name'],
-            candle_data=candle,
-            timeframe="5m"
-        )
-        self.publish_event(candle_event)
+    def _write_to_csv(self, candle: Dict[str, Any]):
+        """Write candle data to CSV file."""
+        try:
+            with open(self._csv_file, 'a', newline='') as f:
+                writer = csv.writer(f)
+                writer.writerow([
+                    candle['timestamp'],
+                    candle.get('name', ''),
+                    candle.get('name', ''),
+                    candle['open'],
+                    candle['high'],
+                    candle['low'],
+                    candle['close'],
+                    candle['volume'],
+                    candle.get('vwap', 0.0)
+                ])
+        except Exception as e:
+            self._logger.error(f"Error writing candle to CSV: {e}")
 
     def reset_vwap(self, inst):
         """Reset VWAP tracking for a new session if needed."""
@@ -116,15 +137,5 @@ class CandleMaker(Publisher, Subscriber):
 
     def register_plotting_handler(self):
         """Initialize live chart server and subscribe to candle events."""
-        self._chart_server = None# LiveChartServer()
-        
-        def plotting_handler(event: CandleGenerated):
-            self._chart_server.add_candle(event.symbol, event.candle_data)
-        
-        self.subscribe_to_event(CandleGenerated, plotting_handler)
-        self._chart_server.start_server()
-        self.subscribe_to_event(CandleGenerated, plotting_handler)
-        self._chart_server.start_server()
-        self.register_handler(plotting_handler)
-        self._chart_server.start_server()
-        self.register_handler(plotting_handler)
+        # Placeholder for future plotting functionality
+        self._logger.info("Plotting handler registration placeholder")

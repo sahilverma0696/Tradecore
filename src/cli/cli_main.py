@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""CLI Dashboard entry point."""
+"""CLI main entry point for the trading dashboard."""
 
 import sys
 import argparse
@@ -11,7 +11,6 @@ from pathlib import Path
 project_root = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(project_root))
 
-from src.cli.dashboard import start_dashboard
 from src.logger_factory import get_logger
 
 
@@ -30,22 +29,44 @@ def main():
     logger = get_logger("CLI", console_output=True)
     logger.info("Starting VWAP Trading Dashboard...")
     
-    if args.demo:
-        # Run with demo data
-        logger.info("Starting demo data generation...")
-        from src.cli.demo_data import start_demo_data_generator
-        demo_thread = threading.Thread(target=start_demo_data_generator, daemon=True)
-        demo_thread.start()
-        time.sleep(1)  # Let demo data start
-    elif args.live:
-        logger.info("Connecting to live trading system EventBus...")
-        # CLI will automatically subscribe to EventBus when dashboard starts
+    # CRITICAL: Initialize EventBus connection BEFORE creating dashboard
+    if args.live:
+        logger.info("🔌 Connecting to live system via IPC files...")
+        logger.info("💡 Dashboard will read live data from data/live_quotes.json")
+        logger.info("💡 Ensure main system is running: python3 -m src.main")
     
-    # Start dashboard
-    use_curses = not args.no_curses
-    logger.info(f"Starting dashboard (curses={'enabled' if use_curses else 'disabled'})")
-    start_dashboard(use_curses=use_curses)
+    elif args.demo:
+        logger.info("🎭 Starting demo data generation...")
+        try:
+            from src.cli.demo_data import start_demo_data_generator
+            demo_thread = threading.Thread(target=start_demo_data_generator, daemon=True)
+            demo_thread.start()
+            time.sleep(1)  # Let demo data start
+        except Exception as e:
+            logger.error(f"❌ Failed to start demo data: {e}")
+            return 1
+    
+    # Import and start dashboard - now uses IPC instead of EventBus
+    try:
+        from src.cli.dashboard import start_dashboard
+        
+        use_curses = not args.no_curses
+        logger.info(f"🖥️  Starting dashboard (curses={'enabled' if use_curses else 'disabled'})")
+        
+        if args.live:
+            logger.info("📡 Dashboard will read live data via IPC files...")
+        
+        start_dashboard(use_curses=use_curses)
+        
+    except Exception as e:
+        logger.error(f"❌ Dashboard error: {e}")
+        return 1
+    
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    exit_code = main()
+    sys.exit(exit_code)
+    start_dashboard(use_curses=use_curses)
+

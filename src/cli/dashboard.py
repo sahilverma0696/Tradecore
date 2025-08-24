@@ -6,18 +6,18 @@ from datetime import datetime
 from typing import Dict, List
 import curses
 from collections import defaultdict
+import json
 
-from src.core.event_bus import EventBus, Subscriber, QuoteEvent, CandleGenerated, EntrySignal, ExitSignal, OrderExecuted
 from src.logger_factory import get_logger
 
 
-class TradingDashboard(Subscriber):
-    """Real-time CLI dashboard for monitoring trading activity."""
+class TradingDashboard:
+    """Real-time CLI dashboard reading from IPC files."""
     
     def __init__(self):
-        super().__init__()
-        self._logger = get_logger("TradingDashboard")
-        self.active_positions = {}
+        self._logger = get_logger("TradingDashboard", console_output=True)
+        
+        # Data storage
         self.recent_quotes = {}
         self.recent_candles = {}
         self.recent_signals = []
@@ -32,135 +32,70 @@ class TradingDashboard(Subscriber):
         self.start_time = datetime.now()
         self.running = False
         
-        # Subscribe to all relevant events
-        self.subscribe_to_event(QuoteEvent, self._on_quote_received)
-        self.subscribe_to_event(CandleGenerated, self._on_candle_generated)
-        self.subscribe_to_event(EntrySignal, self._on_entry_signal)
-        self.subscribe_to_event(ExitSignal, self._on_exit_signal)
-        self.subscribe_to_event(OrderExecuted, self._on_order_executed)
+        # IPC file paths for reading live data
+        self._quote_file = "data/live_quotes.json"
+        self._event_file = "data/live_events.json"
         
-        self._logger.info("TradingDashboard initialized")
+        self._logger.info("✅ TradingDashboard initialized for IPC file reading")
 
-    def _on_quote_received(self, event: QuoteEvent):
-        """Handle quote received events."""
-        self.recent_quotes[event.symbol] = {
-            'ltp': event.ltp,
-            'volume': event.volume,
-            'change': event.change,
-            'timestamp': event.timestamp,
-            'source': event.source
-        }
-        self.system_stats['quotes_received'] += 1
-        
-        # Update active positions with current LTP
-        if event.symbol in self.active_positions:
-            pos = self.active_positions[event.symbol]
-            pos['current_ltp'] = event.ltp
-            pos['last_update'] = event.timestamp
-            self._calculate_pnl(event.symbol)
-        
-        # Log live market data to console for debugging
-        if hasattr(event, 'raw_data') and event.raw_data.get('stream_type') == 'trade':
-            mark_price = event.raw_data.get('mark_price', event.ltp)
-            index_price = event.raw_data.get('index_price', 0)
-            self._logger.debug(f"Live market data: {event.symbol} Mark=${mark_price:.2f} Index=${index_price:.2f}")
+    def _read_live_quotes(self):
+        """Read live quotes from IPC file."""
+        try:
+            if os.path.exists(self._quote_file):
+                with open(self._quote_file, 'r') as f:
+                    quotes_data = json.load(f)
+                
+                for symbol, quote_data in quotes_data.items():
+                    # Parse timestamp
+                    try:
+                        timestamp_str = quote_data.get('timestamp', '')
+                        if timestamp_str:
+                            timestamp = datetime.fromisoformat(timestamp_str.replace('Z', '+00:00'))
+                        else:
+                            timestamp = datetime.now()
+                    except:
+                        timestamp = datetime.now()
+                    
+                    self.recent_quotes[symbol] = {
+                        'symbol': symbol,
+                        'ltp': quote_data.get('ltp', 0.0),
+                        'ltq': quote_data.get('ltq', 0.0),
+                        'timestamp': timestamp,
+                        'source': quote_data.get('source', 'Unknown')
+                    }
+                    
+                # Update stats
+                self.system_stats['quotes_received'] = len(self.recent_quotes)
+                
+        except Exception as e:
+            self._logger.debug(f"Could not read quotes file: {e}")
 
-    def _on_candle_generated(self, event: CandleGenerated):
-        """Handle candle generated events."""
-        self.recent_candles[event.symbol] = {
-            'candle_data': event.candle_data,
-            'timeframe': event.timeframe,
-            'timestamp': event.timestamp
-        }
-        self.system_stats['candles_generated'] += 1
-
-    def _on_entry_signal(self, event: EntrySignal):
-        """Handle entry signal events."""
-        self.active_positions[event.symbol] = {
-            'symbol': event.symbol,
-            'side': event.side,
-            'entry_price': event.entry_price,
-            'entry_vwap': event.entry_vwap,
-            'quantity': event.quantity,
-            'entry_time': event.timestamp,
-            'current_ltp': event.entry_price,
-            'unrealized_pnl': 0.0,
-            'pnl_pct': 0.0,
-            'status': 'ACTIVE',
-            'exit_steps': event.exit_steps,
-            'last_update': event.timestamp
-        }
-        
-        self.recent_signals.append({
-            'type': 'ENTRY',
-            'symbol': event.symbol,
-            'side': event.side,
-            'price': event.entry_price,
-            'timestamp': event.timestamp
-        })
-        
-        # Keep only last 20 signals
-        if len(self.recent_signals) > 20:
-            self.recent_signals.pop(0)
-            
-        self.system_stats['entry_signals'] += 1
-
-    def _on_exit_signal(self, event: ExitSignal):
-        """Handle exit signal events."""
-        if event.symbol in self.active_positions:
-            pos = self.active_positions[event.symbol]
-            pos['exit_price'] = event.exit_price
-            pos['exit_reason'] = event.exit_reason
-            pos['exit_time'] = event.timestamp
-            pos['status'] = 'CLOSED'
-            
-            # Calculate final PnL
-            self._calculate_pnl(event.symbol, final=True)
-            
-            # Move to closed positions after some time
-            threading.Timer(30.0, lambda: self.active_positions.pop(event.symbol, None)).start()
-        
-        self.recent_signals.append({
-            'type': 'EXIT',
-            'symbol': event.symbol,
-            'price': event.exit_price,
-            'reason': event.exit_reason,
-            'timestamp': event.timestamp
-        })
-        
-        if len(self.recent_signals) > 20:
-            self.recent_signals.pop(0)
-            
-        self.system_stats['exit_signals'] += 1
-
-    def _on_order_executed(self, event: OrderExecuted):
-        """Handle order executed events."""
-        self.system_stats['orders_executed'] += 1
-
-    def _calculate_pnl(self, symbol: str, final: bool = False):
-        """Calculate P&L for a position."""
-        if symbol not in self.active_positions:
-            return
-            
-        pos = self.active_positions[symbol]
-        entry_price = pos['entry_price']
-        current_price = pos.get('exit_price' if final else 'current_ltp', entry_price)
-        quantity = pos['quantity']
-        side = pos['side']
-        
-        if side == 'BUY':
-            pnl = (current_price - entry_price) * quantity
-        else:  # SELL
-            pnl = (entry_price - current_price) * quantity
-            
-        pnl_pct = (pnl / (entry_price * quantity)) * 100 if entry_price > 0 else 0
-        
-        pos['unrealized_pnl'] = pnl
-        pos['pnl_pct'] = pnl_pct
-        
-        if final:
-            pos['realized_pnl'] = pnl
-            self.system_stats['total_pnl'] += pnl
+    def _read_live_events(self):
+        """Read latest event from IPC file."""
+        try:
+            if os.path.exists(self._event_file):
+                with open(self._event_file, 'r') as f:
+                    event_data = json.load(f)
+                
+                event_type = event_data.get('type', '')
+                if event_type == 'CandleGenerated':
+                    # Process candle event
+                    data = event_data.get('data', {})
+                    symbol = data.get('symbol', 'Unknown')
+                    self.recent_candles[symbol] = {
+                        'symbol': symbol,
+                        'timestamp': datetime.fromisoformat(event_data.get('timestamp', datetime.now().isoformat())),
+                        'open': data.get('open', 0.0),
+                        'high': data.get('high', 0.0),
+                        'low': data.get('low', 0.0),
+                        'close': data.get('close', 0.0),
+                        'volume': data.get('volume', 0.0),
+                        'vwap': data.get('vwap', 0.0)
+                    }
+                    self.system_stats['candles_generated'] += 1
+                    
+        except Exception as e:
+            self._logger.debug(f"Could not read events file: {e}")
 
     def start_curses_dashboard(self):
         """Start the curses-based dashboard."""
@@ -225,6 +160,48 @@ class TradingDashboard(Subscriber):
             stdscr.addstr(row, 0, stats_line[:width-1])
         row += 2
         
+        # Live Market Data Header - Show Symbol, LTP, LTQ
+        if row < height:
+            stdscr.addstr(row, 0, "LIVE MARKET DATA", curses.A_BOLD)
+        row += 1
+        
+        if row < height:
+            header = f"{'Symbol':<12} {'LTP':<10} {'LTQ':<10} {'Source':<12} {'Time':<8} {'Status':<6}"
+            stdscr.addstr(row, 0, header[:width-1], curses.A_UNDERLINE)
+        row += 1
+        
+        # Live Market Data
+        for symbol, quote in list(self.recent_quotes.items())[-8:]:  # Show last 8 quotes
+            if row >= height - 15:  # Leave space for other sections
+                break
+                
+            # Calculate data freshness
+            age = (datetime.now() - quote['timestamp']).total_seconds()
+            if age < 5:
+                color = curses.color_pair(1)  # Green for fresh
+                status = "LIVE"
+            elif age < 30:
+                color = curses.color_pair(3)  # Yellow for recent
+                status = "OK"
+            else:
+                color = curses.color_pair(2)  # Red for stale
+                status = "STALE"
+            
+            time_str = quote['timestamp'].strftime('%H:%M:%S')
+            
+            quote_line = f"{symbol:<12} {quote['ltp']:<10.2f} {quote['ltq']:<10.4f} " \
+                        f"{quote['source'][:11]:<12} {time_str:<8} {status:<6}"
+            
+            if row < height:
+                stdscr.addstr(row, 0, quote_line[:width-1], color)
+            row += 1
+        
+        if not self.recent_quotes and row < height:
+            stdscr.addstr(row, 0, "No market data - ensure main system is running", curses.color_pair(2))
+            row += 1
+        
+        row += 1
+        
         # Active Positions Header
         if row < height:
             stdscr.addstr(row, 0, "ACTIVE POSITIONS", curses.A_BOLD)
@@ -254,26 +231,6 @@ class TradingDashboard(Subscriber):
         
         row += 1
         
-        # Recent Quotes
-        if row < height:
-            stdscr.addstr(row, 0, "RECENT QUOTES", curses.A_BOLD)
-        row += 1
-        
-        for symbol, quote in list(self.recent_quotes.items())[-5:]:  # Last 5 quotes
-            if row >= height - 10:
-                break
-                
-            quote_line = f"{symbol:<10} LTP: {quote['ltp']:<8.2f} " \
-                        f"Vol: {quote['volume']:<8} Change: {quote['change']:<6.2f}% " \
-                        f"{quote['timestamp'].strftime('%H:%M:%S')}"
-            
-            if row < height:
-                color = curses.color_pair(1) if quote['change'] >= 0 else curses.color_pair(2)
-                stdscr.addstr(row, 0, quote_line[:width-1], color)
-            row += 1
-        
-        row += 1
-        
         # Recent Signals
         if row < height:
             stdscr.addstr(row, 0, "RECENT SIGNALS", curses.A_BOLD)
@@ -298,7 +255,6 @@ class TradingDashboard(Subscriber):
         # Help text
         if height > 10:
             help_text = "Press 'q' to quit"
-            stdscr.addstr(height-1, 0, help_text, curses.color_pair(4))
 
     def start_simple_dashboard(self):
         """Start a simple text-based dashboard (no curses)."""
@@ -315,7 +271,11 @@ class TradingDashboard(Subscriber):
             self.running = False
 
     def _print_simple_dashboard(self):
-        """Print simple dashboard to console with enhanced live data display."""
+        """Print simple dashboard to console with live IPC data."""
+        # Read latest data from IPC files
+        self._read_live_quotes()
+        self._read_live_events()
+        
         os.system('clear' if os.name == 'posix' else 'cls')
         
         print("=" * 80)
@@ -329,15 +289,25 @@ class TradingDashboard(Subscriber):
               f"💰 Total P&L: ${self.system_stats['total_pnl']:.2f}")
         print()
         
-        # Live Market Data (Enhanced)
-        print("🌐 LIVE MARKET DATA:")
+        # IPC Connection Status
+        quote_file_exists = os.path.exists(self._quote_file)
+        event_file_exists = os.path.exists(self._event_file)
+        
+        if quote_file_exists or event_file_exists:
+            print("🔌 IPC Connection: ✅ Reading live data from main system")
+        else:
+            print("🔌 IPC Connection: ❌ No data files found")
+        print()
+        
+        # Live Market Data - Show Symbol, LTP, LTQ
+        print("🌐 LIVE MARKET DATA (via IPC):")
         print("-" * 80)
         if self.recent_quotes:
-            print(f"{'Symbol':<12} {'Price':<12} {'Source':<15} {'Volume':<10} {'Time':<10} {'Status'}")
+            print(f"{'Symbol':<12} {'LTP':<12} {'LTQ':<12} {'Source':<15} {'Time':<10} {'Status'}")
             print("-" * 80)
-            for symbol, quote in list(self.recent_quotes.items())[-10:]:  # Show last 10 quotes
-                price_str = f"${quote['ltp']:.2f}"
-                volume_str = f"{quote['volume']:,}" if quote['volume'] > 0 else "N/A"
+            for symbol, quote in list(self.recent_quotes.items())[-10:]:
+                ltp_str = f"${quote['ltp']:.2f}"
+                ltq_str = f"{quote['ltq']:.4f}" if quote['ltq'] > 0 else "0.0000"
                 time_str = quote['timestamp'].strftime('%H:%M:%S')
                 source_str = quote.get('source', 'Unknown')[:14]
                 
@@ -350,43 +320,128 @@ class TradingDashboard(Subscriber):
                 else:
                     status = "🔴 STALE"
                 
-                print(f"{symbol:<12} {price_str:<12} {source_str:<15} {volume_str:<10} {time_str:<10} {status}")
+                print(f"{symbol:<12} {ltp_str:<12} {ltq_str:<12} {source_str:<15} {time_str:<10} {status}")
         else:
-            print("No market data received yet...")
-            print("💡 Make sure the streamer is running and publishing quote events")
+            print("❌ No market data available...")
+            print("💡 Troubleshooting steps:")
+            print("   1. Ensure main system is running: python3 -m src.main")
+            print("   2. Check if data/ directory exists and has live_quotes.json")
+            print("   3. Verify main system is publishing QuoteEvents")
+            print(f"   4. Files found: quotes={quote_file_exists}, events={event_file_exists}")
         
         print()
         
-        # Active Positions
-        print("📋 ACTIVE POSITIONS:")
-        print("-" * 80)
-        if self.active_positions:
-            print(f"{'Symbol':<10} {'Side':<4} {'Entry':<8} {'Current':<8} {'P&L':<8} {'P&L%':<6} {'Status':<8}")
-            for symbol, pos in self.active_positions.items():
-                pnl_indicator = "📈" if pos['pnl_pct'] >= 0 else "📉"
-                print(f"{symbol:<10} {pos['side']:<4} {pos['entry_price']:<8.2f} "
-                      f"{pos['current_ltp']:<8.2f} {pos['unrealized_pnl']:<8.2f} "
-                      f"{pos['pnl_pct']:<6.1f} {pos['status']:<8} {pnl_indicator}")
-        else:
-            print("No active positions")
-        
-        print()
-        
-        # Recent Signals
-        if self.recent_signals:
-            print("📡 RECENT SIGNALS:")
+        # Recent Candles
+        if self.recent_candles:
+            print("🕯️  RECENT CANDLES:")
             print("-" * 80)
-            for signal in self.recent_signals[-5:]:  # Show last 5 signals
-                signal_time = signal['timestamp'].strftime('%H:%M:%S')
-                signal_type = signal['type']
-                symbol = signal['symbol']
-                price = signal['price']
-                
-                signal_indicator = "🔵" if signal_type == 'ENTRY' else "🔴"
-                print(f"{signal_time} {signal_indicator} {signal_type} {symbol} @ ${price:.2f}")
+            print(f"{'Symbol':<12} {'Open':<8} {'High':<8} {'Low':<8} {'Close':<8} {'Volume':<8} {'VWAP':<8}")
+            print("-" * 80)
+            for symbol, candle in list(self.recent_candles.items())[-5:]:
+                print(f"{symbol:<12} {candle['open']:<8.2f} {candle['high']:<8.2f} "
+                      f"{candle['low']:<8.2f} {candle['close']:<8.2f} {candle['volume']:<8.2f} "
+                      f"{candle['vwap']:<8.2f}")
             print()
         
-        print("💡 Commands: --demo (demo data) | --live (live system) | Ctrl+C (exit)")
+        print("💡 Reading live data via IPC files | Press Ctrl+C to exit")
+
+def start_dashboard(use_curses=True):
+    """Start the trading dashboard."""
+    dashboard = TradingDashboard()
+    
+    if use_curses:
+        try:
+            dashboard.start_curses_dashboard()
+        except Exception as e:
+            print(f"Curses not available: {e}")
+            print("Falling back to simple dashboard...")
+            dashboard.start_simple_dashboard()
+    else:
+        dashboard.start_simple_dashboard()
+    
+    return dashboard
+
+
+if __name__ == "__main__":
+    start_dashboard()
+        
+    # System Stats
+    uptime = datetime.now() - self.start_time
+    print(f"⏱️  Uptime: {uptime} | 📈 Quotes: {self.system_stats['quotes_received']} | "
+          f"🕯️  Candles: {self.system_stats['candles_generated']} | "
+          f"💰 Total P&L: ${self.system_stats['total_pnl']:.2f}")
+    print()
+    
+    # Connection Status Check
+    try:
+        quote_subscribers = len(self.event_bus._subscribers.get('QuoteEvent', []))
+        print(f"🔌 EventBus Connection: ✅ Active ({quote_subscribers} QuoteEvent subscribers)")
+    except:
+        print("🔌 EventBus Connection: ❌ Disconnected")
+    print()
+    
+    # Live Market Data - Show Symbol, LTP, LTQ
+    print("🌐 LIVE MARKET DATA:")
+    print("-" * 80)
+    if self.recent_quotes:
+        print(f"{'Symbol':<12} {'LTP':<12} {'LTQ':<12} {'Source':<15} {'Time':<10} {'Status'}")
+        print("-" * 80)
+        for symbol, quote in list(self.recent_quotes.items())[-10:]:  # Show last 10 quotes
+            ltp_str = f"${quote['ltp']:.2f}"
+            ltq_str = f"{quote['ltq']:.4f}" if quote['ltq'] > 0 else "0.0000"
+            time_str = quote['timestamp'].strftime('%H:%M:%S')
+            source_str = quote.get('source', 'Unknown')[:14]
+            
+            # Add status indicator for recent data
+            age = (datetime.now() - quote['timestamp']).total_seconds()
+            if age < 5:
+                status = "🟢 LIVE"
+            elif age < 30:
+                status = "🟡 RECENT"
+            else:
+                status = "🔴 STALE"
+            
+            print(f"{symbol:<12} {ltp_str:<12} {ltq_str:<12} {source_str:<15} {time_str:<10} {status}")
+    else:
+        print("❌ No market data received yet...")
+        print("💡 Troubleshooting steps:")
+        print("   1. Ensure main system is running: python3 -m src.main")
+        print("   2. Check if BinanceStreamer is publishing events")
+        print("   3. Verify EventBus connection in main system")
+        print("   4. Check for any errors in the main system logs")
+    
+    print()
+    
+    # Active Positions
+    print("📋 ACTIVE POSITIONS:")
+    print("-" * 80)
+    if self.active_positions:
+        print(f"{'Symbol':<10} {'Side':<4} {'Entry':<8} {'Current':<8} {'P&L':<8} {'P&L%':<6} {'Status':<8}")
+        for symbol, pos in self.active_positions.items():
+            pnl_indicator = "📈" if pos['pnl_pct'] >= 0 else "📉"
+            print(f"{symbol:<10} {pos['side']:<4} {pos['entry_price']:<8.2f} "
+                  f"{pos['current_ltp']:<8.2f} {pos['unrealized_pnl']:<8.2f} "
+                  f"{pos['pnl_pct']:<6.1f} {pos['status']:<8} {pnl_indicator}")
+    else:
+        print("No active positions")
+    
+    print()
+    
+    # Recent Signals
+    if self.recent_signals:
+        print("📡 RECENT SIGNALS:")
+        print("-" * 80)
+        for signal in self.recent_signals[-5:]:  # Show last 5 signals
+            signal_time = signal['timestamp'].strftime('%H:%M:%S')
+            signal_type = signal['type']
+            symbol = signal['symbol']
+            price = signal['price']
+            
+            signal_indicator = "🔵" if signal_type == 'ENTRY' else "🔴"
+            print(f"{signal_time} {signal_indicator} {signal_type} {symbol} @ ${price:.2f}")
+        print()
+    
+    print("💡 Commands: --demo (demo data) | --live (live system) | Ctrl+C (exit)")
 
 def start_dashboard(use_curses=True):
     """Start the trading dashboard."""

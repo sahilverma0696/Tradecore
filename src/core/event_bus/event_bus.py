@@ -4,6 +4,9 @@ from collections import defaultdict
 import traceback
 from src.logger_factory import get_logger
 from .events import Event
+import json
+import os
+from datetime import datetime
 
 
 class EventBus:
@@ -30,6 +33,12 @@ class EventBus:
         self._max_history = 1000
         self._initialized = True
         self._logger.info("EventBus initialized and ready for component registration")
+        
+        # IPC support for CLI communication
+        self._ipc_enabled = True
+        self._ipc_file = "data/live_events.json"
+        self._quote_file = "data/live_quotes.json"
+        os.makedirs("data", exist_ok=True)
     
     def subscribe(self, event_type: Type[Event], callback: Callable[[Event], None], 
                   subscriber_name: str = None):
@@ -70,7 +79,80 @@ class EventBus:
                     subscriber_name = getattr(callback, '__name__', 'unknown')
                     self._logger.error(f"❌ Error in subscriber {subscriber_name} for {event.__class__.__name__}: {e}")
                     self._logger.debug(traceback.format_exc())
+            
+            # Write to IPC files for CLI access
+            if self._ipc_enabled:
+                self._write_event_to_ipc(event)
     
+    def _write_event_to_ipc(self, event: Event):
+        """Write event to IPC file for CLI consumption."""
+        try:
+            event_type = event.__class__.__name__
+            event_data = {
+                'timestamp': datetime.now().isoformat(),
+                'type': event_type,
+                'data': self._serialize_event(event)
+            }
+            
+            # Write to general events file
+            try:
+                with open(self._ipc_file, 'w') as f:
+                    json.dump(event_data, f, indent=2)
+            except Exception as e:
+                self._logger.debug(f"Could not write to IPC file: {e}")
+            
+            # Write QuoteEvents to dedicated quotes file for real-time display
+            if event_type == 'QuoteEvent':
+                try:
+                    quote_data = {
+                        'timestamp': event.timestamp.isoformat() if hasattr(event.timestamp, 'isoformat') else str(event.timestamp),
+                        'symbol': event.instrument,
+                        'ltp': event.ltp,
+                        'ltq': event.ltq,
+                        'source': event.source,
+                        'updated_at': datetime.now().isoformat()
+                    }
+                    
+                    # Read existing quotes
+                    quotes = {}
+                    if os.path.exists(self._quote_file):
+                        try:
+                            with open(self._quote_file, 'r') as f:
+                                quotes = json.load(f)
+                        except:
+                            quotes = {}
+                    
+                    # Update with new quote
+                    quotes[event.instrument] = quote_data
+                    
+                    # Write back to file
+                    with open(self._quote_file, 'w') as f:
+                        json.dump(quotes, f, indent=2)
+                        
+                except Exception as e:
+                    self._logger.debug(f"Could not write quote to IPC file: {e}")
+                    
+        except Exception as e:
+            self._logger.debug(f"IPC write error: {e}")
+
+    def _serialize_event(self, event: Event):
+        """Serialize event for IPC."""
+        try:
+            data = {}
+            for attr in dir(event):
+                if not attr.startswith('_') and not callable(getattr(event, attr)):
+                    value = getattr(event, attr)
+                    if hasattr(value, 'isoformat'):  # datetime
+                        data[attr] = value.isoformat()
+                    elif isinstance(value, (str, int, float, bool, list, dict)):
+                        data[attr] = value
+                    else:
+                        data[attr] = str(value)
+            return data
+        except Exception as e:
+            self._logger.debug(f"Serialization error: {e}")
+            return {'error': 'serialization_failed'}
+
     def get_event_history(self, event_type: Type[Event] = None, limit: int = None) -> List[Event]:
         """Get event history, optionally filtered by type."""
         with self._lock:

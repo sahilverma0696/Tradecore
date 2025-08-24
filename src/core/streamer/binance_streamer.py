@@ -18,6 +18,7 @@ class BinanceStreamer(BaseStreamer):
         super().__init__(symbols, name_symbol)
         self.name_symbol = name_symbol
         self._ws = None
+        self._ws_connected = False
         
         # Handle additional configuration from kwargs
         self.reconnect_attempts = kwargs.get('reconnect_attempts', 3)
@@ -31,48 +32,46 @@ class BinanceStreamer(BaseStreamer):
         if not self.symbols:
             raise ValueError("No symbols provided for Binance WebSocket.")
 
-        # Create direct trade stream URL like sample_binance.py
-        ws_url = "wss://stream.binance.com:9443/ws/" + "/".join([f"{symbol.lower()}@trade" for symbol in self.symbols])
+        # Only create connection if not already created
+        if self._ws is None:
+            # Create direct trade stream URL like sample_binance.py
+            ws_url = "wss://stream.binance.com:9443/ws/" + "/".join([f"{symbol.lower()}@trade" for symbol in self.symbols])
+                
+            self._logger.info(f"Setting up Binance WebSocket: {ws_url}")
             
-        self._logger.info(f"Setting up Binance WebSocket: {ws_url}")
-        
-        # Create WebSocket application exactly like sample_binance.py
-        self._ws = websocket.WebSocketApp(
-            ws_url,
-            on_message=self._on_message,
-            on_error=self._on_error,
-            on_close=self._on_close,
-            on_open=self._on_open
-        )
+            # Create WebSocket application exactly like sample_binance.py
+            self._ws = websocket.WebSocketApp(
+                ws_url,
+                on_message=self._on_message,
+                on_error=self._on_error,
+                on_close=self._on_close,
+                on_open=self._on_open
+            )
 
     def _run_connection(self):
         """Run the WebSocket connection."""
-        def _run_websocket():
-            """Internal function to run WebSocket in thread pool."""
-            try:
+        try:
+            if self._ws and not self._ws_connected:
                 self._logger.info("Starting Binance WebSocket connection...")
                 self._ws.run_forever(sslopt={"cert_reqs": ssl.CERT_NONE})
-            except Exception as e:
-                self._logger.error(f"WebSocket run_forever error: {e}")
-                raise
-
-        # Submit WebSocket connection to thread pool
-        thread_manager = ThreadManager()
-        self._ws_future = thread_manager.submit_task(
-            ThreadPoolType.STREAMER,
-            _run_websocket
-        )
-        
-        self._logger.info("WebSocket connection task submitted to thread pool")
+            else:
+                self._logger.warning("WebSocket already connected or not initialized")
+        except Exception as e:
+            self._logger.error(f"WebSocket run_forever error: {e}")
+            self._ws_connected = False
+            raise
 
     def _cleanup_connection(self):
         """Cleanup WebSocket connection."""
-        if self._ws:
+        if self._ws and self._ws_connected:
             try:
                 self._ws.close()
                 self._logger.info("Binance WebSocket connection closed")
             except Exception as e:
                 self._logger.error(f"Error closing WebSocket: {e}")
+            finally:
+                self._ws_connected = False
+                self._ws = None
 
     def _on_message(self, ws, message):
         """Handle incoming WebSocket messages."""
@@ -94,8 +93,14 @@ class BinanceStreamer(BaseStreamer):
             trade_symbol = raw_data.get('s', '').upper()  # Symbol
             trade_time = raw_data.get('T', 0)       # Trade time
             
+            # Convert timestamp to datetime if it's a number
+            if isinstance(trade_time, (int, float)):
+                timestamp = datetime.fromtimestamp(trade_time / 1000)
+            else:
+                timestamp = datetime.now()
+            
             return QuoteEvent(
-                timestamp=trade_time,
+                timestamp=timestamp,
                 instrument=trade_symbol,
                 name=symbol,
                 ltp=price,
@@ -108,32 +113,31 @@ class BinanceStreamer(BaseStreamer):
 
     def _on_open(self, ws):
         """Handle WebSocket connection open."""
+        self._ws_connected = True
         self._logger.info("Binance WebSocket connection opened")
 
+    def _on_close(self, ws, close_status_code, close_msg):
+        """Handle WebSocket connection close."""
+        self._ws_connected = False
+        self._logger.warning(f"Binance WebSocket closed: {close_status_code} - {close_msg}")
 
     def _on_error(self, ws, error):
         """Handle WebSocket errors."""
         self._logger.error(f"Binance WebSocket error: {error}")
+        # TODO: Implement reconnection logic here
 
     def get_client(self):
         """Get the Binance client instance (if available)."""
         return getattr(self, '_client', None)
     
 
-    def _on_close(self, ws, close_status_code, close_msg):
-        """Handle WebSocket connection close."""
-        self._logger.warning(f"Binance WebSocket closed: {close_status_code} - {close_msg}")
-        self._is_subscribed = False
-
-    
     def _unsubscribe_from_symbols(self):
         """Unsubscribe from mark price WebSocket streams."""
         try:
             if not self._is_subscribed:
                 return
-                
-            # Create mark price stream parameters for unsubscription
-            params = [f"{symbol.lower()}@markPrice@1s" for symbol in self.symbols]
+            # Create trade stream parameters for unsubscription
+            params = [f"{symbol.lower()}@trade" for symbol in self.symbols]
             
             unsubscription_message = {
                 "method": "UNSUBSCRIBE", 
@@ -149,4 +153,3 @@ class BinanceStreamer(BaseStreamer):
             self._logger.error(f"Error unsubscribing from symbols: {e}")
 
 
-        
