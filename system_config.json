@@ -43,13 +43,10 @@
       },
       "binance": {
         "reconnect_attempts": 5,
-        "reconnect_delay": 10.0,
+        "reconnect_delay": 2.0,
         "stream_timeout": 60,
-        "ping_interval": 180,
         "testnet": false,
-        "stream_type": "markPrice",
-        "name_symbol": "CRYPTO_FUTURES",
-        "interval": "1m"
+        "name_symbol": "btcusdt"
       }
     }
   },

@@ -40,12 +40,9 @@ class BinanceStreamer(BaseStreamer):
         """Setup Binance WebSocket connection."""
         if not self.symbols:
             raise ValueError("No symbols provided for Binance WebSocket.")
-        
-        # Use appropriate WebSocket URL for futures
-        if self.testnet:
-            ws_url = "wss://testnet.binance.vision/ws"
-        else:
-            ws_url = "wss://stream.binance.com:9443/ws"
+
+
+        ws_url = "wss://stream.binance.com:9443/ws/"+"/".join([f"{symbol.lower()}@trade" for symbol in self.symbols])
             
         self._logger.info(f"Setting up Binance WebSocket: {ws_url}")
         
@@ -65,10 +62,8 @@ class BinanceStreamer(BaseStreamer):
             try:
                 self._logger.info("Starting Binance WebSocket connection...")
                 self._ws.run_forever(
-                    sslopt={"cert_reqs": ssl.CERT_NONE},
-                    ping_interval=self.ping_interval,
-                    ping_timeout=10
-                )
+                    sslopt={"cert_reqs": ssl.CERT_NONE}
+                    )
             except Exception as e:
                 self._logger.error(f"WebSocket run_forever error: {e}")
                 raise
@@ -162,8 +157,6 @@ class BinanceStreamer(BaseStreamer):
     def _on_open(self, ws):
         """Handle WebSocket connection open."""
         self._logger.info("Binance WebSocket connection opened")
-        # Subscribe to mark price streams after connection opens
-        self._subscribe_to_symbols()
 
     def _on_close(self, ws, close_status_code, close_msg):
         """Handle WebSocket connection close."""
@@ -174,24 +167,7 @@ class BinanceStreamer(BaseStreamer):
         """Handle WebSocket errors."""
         self._logger.error(f"Binance WebSocket error: {error}")
 
-    def _subscribe_to_symbols(self):
-        """Subscribe to mark price WebSocket streams for symbols."""
-        try:
-            # Create mark price stream parameters
-            params = [f"{symbol.lower()}@markPrice@1s" for symbol in self.symbols]
-            
-            subscription_message = {
-                "method": "SUBSCRIBE",
-                "params": params,
-                "id": self._subscription_id
-            }
-            
-            self._logger.info(f"Subscribing to Binance mark price streams: {params}")
-            self._ws.send(json.dumps(subscription_message))
-            
-        except Exception as e:
-            self._logger.error(f"Error subscribing to symbols: {e}")
-
+    
     def _unsubscribe_from_symbols(self):
         """Unsubscribe from mark price WebSocket streams."""
         try:
@@ -217,76 +193,4 @@ class BinanceStreamer(BaseStreamer):
     def get_client(self):
         """Get the Binance client instance (if available)."""
         return getattr(self, '_client', None)
-            
-    def _on_open(self, ws):
-        """Handle WebSocket connection open."""
-        self._logger.info("Binance WebSocket connection opened")
-        # Subscribe to symbols after connection opens
-        self._subscribe_to_symbols()
-
-    def _on_close(self, ws, close_status_code, close_msg):
-        """Handle WebSocket connection close."""
-        self._logger.warning(f"Binance WebSocket closed: {close_status_code} - {close_msg}")
-        self._is_subscribed = False
-
-    def _on_error(self, ws, error):
-        """Handle WebSocket errors."""
-        self._logger.error(f"Binance WebSocket error: {error}")
-
-    def _subscribe_to_symbols(self):
-        """Subscribe to WebSocket data streams for symbols."""
-        try:
-            # Create stream parameters based on stream type
-            if self.stream_type == 'markPrice':
-                params = [f"{symbol.lower()}@markPrice@1s" for symbol in self.symbols]
-            elif self.stream_type == 'kline':
-                params = [f"{symbol.lower()}@kline_{self.interval}" for symbol in self.symbols]
-            elif self.stream_type == 'ticker':
-                params = [f"{symbol.lower()}@ticker" for symbol in self.symbols]
-            else:
-                params = [f"{symbol.lower()}@ticker" for symbol in self.symbols]
-            
-            subscription_message = {
-                "method": "SUBSCRIBE",
-                "params": params,
-                "id": self._subscription_id
-            }
-            
-            self._logger.info(f"Subscribing to Binance streams: {params}")
-            self._ws.send(json.dumps(subscription_message))
-            
-        except Exception as e:
-            self._logger.error(f"Error subscribing to symbols: {e}")
-
-    def _unsubscribe_from_symbols(self):
-        """Unsubscribe from WebSocket data streams."""
-        try:
-            if not self._is_subscribed:
-                return
-                
-            # Create stream parameters for unsubscription
-            if self.stream_type == 'markPrice':
-                params = [f"{symbol.lower()}@markPrice@1s" for symbol in self.symbols]
-            elif self.stream_type == 'kline':
-                params = [f"{symbol.lower()}@kline_{self.interval}" for symbol in self.symbols]
-            elif self.stream_type == 'ticker':
-                params = [f"{symbol.lower()}@ticker" for symbol in self.symbols]
-            else:
-                params = [f"{symbol.lower()}@ticker" for symbol in self.symbols]
-            
-            unsubscription_message = {
-                "method": "UNSUBSCRIBE",
-                "params": params,
-                "id": self._subscription_id + 1
-            }
-            
-            self._logger.info(f"Unsubscribing from Binance streams: {params}")
-            self._ws.send(json.dumps(unsubscription_message))
-            self._is_subscribed = False
-            
-        except Exception as e:
-            self._logger.error(f"Error unsubscribing from symbols: {e}")
-
-    def get_client(self):
-        """Get the Binance client instance (if available)."""
-        return getattr(self, '_client', None)
+        

@@ -60,7 +60,7 @@ class TradingDashboard(Subscriber):
             self._calculate_pnl(event.symbol)
         
         # Log live market data to console for debugging
-        if hasattr(event, 'raw_data') and event.raw_data.get('stream_type') == 'markPrice':
+        if hasattr(event, 'raw_data') and event.raw_data.get('stream_type') == 'trade':
             mark_price = event.raw_data.get('mark_price', event.ltp)
             index_price = event.raw_data.get('index_price', 0)
             self._logger.debug(f"Live market data: {event.symbol} Mark=${mark_price:.2f} Index=${index_price:.2f}")
