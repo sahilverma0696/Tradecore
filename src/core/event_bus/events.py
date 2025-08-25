@@ -62,10 +62,9 @@ class EntrySignal(Event):
     symbol: str
     direction: str  # 'BUY' or 'SELL'
     price: float
-    quantity: int
     strategy: str
-    confidence: float = 0.0
     reason: str = ""
+    candle: CandleGenerated = None
 
 
 @dataclass  
