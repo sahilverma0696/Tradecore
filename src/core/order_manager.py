@@ -1,6 +1,7 @@
 from typing import Dict
 from datetime import datetime
 from src.core.event_bus import Subscriber, Publisher, EntrySignal, ExitSignal, OrderExecuted
+from src.core.event_bus.events import CandleGenerated, QuoteEvent
 from src.logger_factory import get_logger
 from src.core.order_object import OrderObject
 from src.core.order_logger import OrderLogger
@@ -19,7 +20,9 @@ class OrderManager(Subscriber, Publisher):
         
         # Subscribe to trading signal events - CRITICAL for receiving trading signals
         self.subscribe_to_event(EntrySignal, self.on_entry_signal)
-        self.subscribe_to_event(ExitSignal, self.on_exit_signal)
+        # self.subscribe_to_event(ExitSignal, self.on_exit_signal) ## exit manager is a wired service
+        # self.subscribe_to_event(QuoteEvent, self._on_ltp_update)
+        # self.subscribe_to_event(CandleGenerated, self._on_candle_update)
         self._logger.info(f"✅ OrderManager subscribed to EntrySignal and ExitSignal events")
         
     def register_handler(self, cb):
@@ -31,30 +34,19 @@ class OrderManager(Subscriber, Publisher):
         """Set the exit manager for handling exits"""
         self._exit_manager = exit_manager
         
-    def handle_signal(self, signal_data: dict):
-        """Handle entry signals from strategy"""
-        signal_type = signal_data.get('signal')
-        symbol = signal_data.get('symbol')
         
-        if signal_type == 'ENTER':
-            self._handle_entry_signal(signal_data)
-        elif signal_type == 'EXIT':
-            self._handle_exit_signal(signal_data)
-        else:
-            self._logger.warning(f"Unknown signal: {signal_type} for symbol: {symbol}")
-
-    def _handle_entry_signal(self, signal_data):
+    def _handle_entry_signal(self, event: EntrySignal):
         """Handle entry signal from strategy"""
-        symbol = signal_data['symbol']
-        side = signal_data['side']
-        
+        symbol = event.symbol
+        side = event.side
+
         # Check if order already exists
         existing_order = self._orders.get(symbol)
         if existing_order:
             if existing_order.get_side() != side:
                 # Close opposite direction order and create new one
                 self._logger.info(f"Switching direction for {symbol} from {existing_order.get_side()} to {side}")
-                self._exit_order(symbol, signal_data['entry_price'], datetime.now(), "DIRECTION_SWITCH")
+                self._exit_order(symbol, event.price, datetime.now(), "DIRECTION_SWITCH")
             else:
                 self._logger.warning(f"Order {symbol} already exists with same direction")
                 return
@@ -62,16 +54,16 @@ class OrderManager(Subscriber, Publisher):
         # Create new order
         order = OrderObject(
             name=symbol,
-            instrument=signal_data['name'],
-            step=[s[0] for s in signal_data.get('steps', [])],
-            trail=[s[1] for s in signal_data.get('steps', [])],
+            instrument=event.symbol,
+            step=[s[0] for s in event.steps],   # to be read from config
+            trail=[s[1] for s in event.steps],  # to be read from config
             side=side,
-            candle=signal_data['candle']
+            candle=event.candle
         )
-        order.total_quantity = signal_data['quantity']
-        
-        self._orders[symbol] = order
-        self._logger.info(f"Created order {symbol} {side} @ {signal_data['entry_price']}")
+        order.total_quantity = event.quantity # to be read from config
+
+        self._orders[symbol] = order # to be made atomic
+        self._logger.info(f"Created order {symbol} {side} @ {event.entry_price}")
         self._order_logger.log_entry(order)
         
         # Execute order
@@ -79,7 +71,7 @@ class OrderManager(Subscriber, Publisher):
             try:
                 # Send to executioner: symbol, direction, timestamp
                 direction = "B" if side == "BUY" else "S"
-                cb(signal_data['name'], direction, signal_data['entry_time'])
+                cb(event.name, direction, event.entry_time)
             except Exception as e:
                 self._logger.error(f"Handler error: {e}")
 
@@ -150,7 +142,7 @@ class OrderManager(Subscriber, Publisher):
             self._logger.info(f"📋 Received entry signal for {event.symbol}: {event.direction} at {event.price}")
             
             # Process entry signal and place order
-            self.handle_entry_signal(event)
+            self._handle_entry_signal(event)
             
         except Exception as e:
             self._logger.error(f"Error handling entry signal: {e}")
