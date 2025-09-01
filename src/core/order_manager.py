@@ -5,6 +5,7 @@ from src.core.event_bus.events import CandleGenerated, QuoteEvent
 from src.logger_factory import get_logger
 from src.core.order_object import OrderObject
 from src.core.order_logger import OrderLogger
+from src.config_manager import ConfigManager
 
 class OrderManager(Subscriber, Publisher):
     """Manages order lifecycle and execution."""
@@ -16,6 +17,11 @@ class OrderManager(Subscriber, Publisher):
         self._order_logger = OrderLogger(log_dir)
         self._handlers = []  # callback for order execution
         self._exit_manager = None  # Will be set from main.py
+        
+        # Load trading configuration
+        self._config_manager = ConfigManager()
+        self._trading_config = self._config_manager.get()
+        
         self._logger.info("OrderManager initialized")
         
         # Subscribe to trading signal events - CRITICAL for receiving trading signals
@@ -33,12 +39,29 @@ class OrderManager(Subscriber, Publisher):
     def set_exit_manager(self, exit_manager):
         """Set the exit manager for handling exits"""
         self._exit_manager = exit_manager
+    
+    def _get_exit_steps_from_config(self) -> list:
+        """Get exit steps from trading config."""
+        return self._trading_config.get('exit_steps', [[0.02, 0.3], [0.04, 0.3]])
+    
+    def _get_quantity_from_config(self, symbol: str = None) -> int:
+        """Get quantity from trading config based on symbol or use default."""
+        quantities = self._trading_config.get('execution', {}).get('quantities', {})
         
+        # Try symbol-specific quantity first
+        if symbol:
+            symbol_key = symbol.upper()
+            if symbol_key in quantities:
+                return quantities[symbol_key]
+        
+        # Fall back to default quantity
+        return quantities.get('default', self._trading_config.get('default_quantity', 75))
         
     def _handle_entry_signal(self, event: EntrySignal):
         """Handle entry signal from strategy"""
         symbol = event.symbol
-        side = event.side
+        side = event.direction
+        print(f"DEBUG: Handling entry signal for {symbol} side {side}")
 
         # Check if order already exists
         existing_order = self._orders.get(symbol)
@@ -51,19 +74,28 @@ class OrderManager(Subscriber, Publisher):
                 self._logger.warning(f"Order {symbol} already exists with same direction")
                 return
 
+        # Get configuration values from trading config
+        exit_steps = self._get_exit_steps_from_config()
+        quantity = self._get_quantity_from_config(symbol)
+        candle = event.candle
         # Create new order
-        order = OrderObject(
-            name=symbol,
-            instrument=event.symbol,
-            step=[s[0] for s in event.steps],   # to be read from config
-            trail=[s[1] for s in event.steps],  # to be read from config
-            side=side,
-            candle=event.candle
-        )
-        order.total_quantity = event.quantity # to be read from config
+        try:
+            order = OrderObject(
+                name=symbol,
+                instrument=event.symbol,
+                step=[s[0] for s in exit_steps], 
+                trail=[s[1] for s in exit_steps],
+                side=side,
+                candle=candle
+            )
+            order.total_quantity = quantity
+        except Exception as e:
+            print(f"DEBUG: Error creating OrderObject: {e}")
+            self._logger.error(f"Error creating OrderObject: {e}")
+            
 
         self._orders[symbol] = order # to be made atomic
-        self._logger.info(f"Created order {symbol} {side} @ {event.entry_price}")
+        self._logger.info(f"Created order {symbol} {side} @ {event.price} (Qty: {quantity}, Steps: {len(exit_steps)})")
         self._order_logger.log_entry(order)
         
         # Execute order
@@ -71,7 +103,7 @@ class OrderManager(Subscriber, Publisher):
             try:
                 # Send to executioner: symbol, direction, timestamp
                 direction = "B" if side == "BUY" else "S"
-                cb(event.name, direction, event.entry_time)
+                cb(event.name, direction, getattr(event, 'timestamp', datetime.now()))
             except Exception as e:
                 self._logger.error(f"Handler error: {e}")
 
@@ -140,7 +172,7 @@ class OrderManager(Subscriber, Publisher):
         """Handle entry signal events."""
         try:
             self._logger.info(f"📋 Received entry signal for {event.symbol}: {event.direction} at {event.price}")
-            
+            print(f"DEBUG: on_entry_signal received for {event.symbol} side {event.direction}")
             # Process entry signal and place order
             self._handle_entry_signal(event)
             
