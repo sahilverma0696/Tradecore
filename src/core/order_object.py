@@ -1,4 +1,5 @@
 from datetime import datetime
+from src.core.event_bus.events import CandleGenerated
 from src.logger_factory import get_logger
 
 
@@ -14,7 +15,7 @@ class OrderObject:
         self.current_step_idx = 0
         self.current_step = self.step[0] if self.step else 0.05
         self.current_trail = self.trail[0] if self.trail else 0.03
-        self.current_candle = candle
+        self.current_candle: CandleGenerated = candle
         self.ltp = 0
         self.filled_steps = set()  # TODO: maybe not the best way, the idea is to track which steps have been filled
         self.total_quantity = 0  # total quantity filled in this order
@@ -23,8 +24,8 @@ class OrderObject:
         self.logger.debug(f"Creating OrderObject: {name}, Instrument: {instrument}, Side: {side}, Step: {self.step}, Trail: {self.trail}")
         
 
-        # Entry & timestamps
-        self.entry_price = candle['close'] if candle and 'close' in candle else 0
+        # Entry & timestamps - Handle both dict and CandleGenerated objects
+        self.entry_price = self._extract_close_price(candle)
         if self.entry_price == 0:
             self.logger.warning(f"Entry price is 0 for order {name}, please check the candle data.")
         self.entry_time = datetime.now()
@@ -45,8 +46,25 @@ class OrderObject:
         self.retreat = 0.0  # pullback from max
         self.current_pct = 0.0  # current PnL %
         self.logger.debug(f"OrderObject {name} initialized with max_pct: {self.max_pct}, min_pct: {self.min_pct}, retreat: {self.retreat}, current_pct: {self.current_pct}")
+    
+    def _extract_close_price(self, candle):
+        """Extract close price from either dict or CandleGenerated object."""
+        if not candle:
+            return 0
         
-        
+        try:
+            # Handle CandleGenerated event object
+            if hasattr(candle, 'close'):
+                return float(candle.close)
+            # Handle dictionary format
+            elif isinstance(candle, dict) and 'close' in candle:
+                return float(candle['close'])
+            else:
+                self.logger.warning(f"Unrecognized candle format: {type(candle)}")
+                return 0
+        except (ValueError, TypeError) as e:
+            self.logger.error(f"Error extracting close price from candle: {e}")
+            return 0
 
     # ----------------- setters -----------------
     def set_ltp(self, ltp, timestamp=None):
@@ -62,9 +80,10 @@ class OrderObject:
             self.entry_time = self.last_update_time
 
     def set_current_candle(self, candle, timestamp=None):
-        self.current_candle = candle
-        if candle and 'close' in candle:
-            self.set_ltp(candle['close'], timestamp)
+        self.current_candle: CandleGenerated = candle
+        close_price = self.current_candle.close
+        if close_price > 0:
+            self.set_ltp(close_price, timestamp)
 
     def _update_min_max_price(self, price):
         if self.min_price == 0 or price < self.min_price:

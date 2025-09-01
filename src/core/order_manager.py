@@ -59,6 +59,7 @@ class OrderManager(Subscriber, Publisher):
         
     def _handle_entry_signal(self, event: EntrySignal):
         """Handle entry signal from strategy"""
+        print(f"DEBUG: Printing complete event {event}")
         symbol = event.symbol
         side = event.direction
         print(f"DEBUG: Handling entry signal for {symbol} side {side}")
@@ -77,7 +78,6 @@ class OrderManager(Subscriber, Publisher):
         # Get configuration values from trading config
         exit_steps = self._get_exit_steps_from_config()
         quantity = self._get_quantity_from_config(symbol)
-        candle = event.candle
         # Create new order
         try:
             order = OrderObject(
@@ -86,7 +86,7 @@ class OrderManager(Subscriber, Publisher):
                 step=[s[0] for s in exit_steps], 
                 trail=[s[1] for s in exit_steps],
                 side=side,
-                candle=candle
+                candle=event.candle
             )
             order.total_quantity = quantity
         except Exception as e:
@@ -103,7 +103,7 @@ class OrderManager(Subscriber, Publisher):
             try:
                 # Send to executioner: symbol, direction, timestamp
                 direction = "B" if side == "BUY" else "S"
-                cb(event.name, direction, getattr(event, 'timestamp', datetime.now()))
+                cb(event.symbol, direction, getattr(event, 'timestamp', datetime.now()))
             except Exception as e:
                 self._logger.error(f"Handler error: {e}")
 

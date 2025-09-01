@@ -54,7 +54,7 @@ class VwapStrategy(Subscriber, Publisher):
         elif open_price > vwap and close_price < vwap:
             self._trigger_entry_signal(symbol, 'SELL', close_price, event, vwap)
 
-    def _trigger_entry_signal(self, symbol, side, price, event, vwap):
+    def _trigger_entry_signal(self, symbol, side, price, event: CandleGenerated, vwap):
         entry_signal_data = {
             'symbol': symbol,
             'side': side,
@@ -78,6 +78,7 @@ class VwapStrategy(Subscriber, Publisher):
             strategy="VWAPCommutative",
             candle=event
         )
+        self.logger.info(f"Publishing EntrySignal event: {asdict(entry_event)}")
         self.publish_event(entry_event)
 
     def get_active_positions(self) -> Dict[str, dict]:
