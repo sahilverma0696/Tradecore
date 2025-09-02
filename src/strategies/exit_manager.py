@@ -101,6 +101,7 @@ class ExitManager(Publisher):
 
         return None
 
+    ## TODO: check which of the two qualify
     def _check_trailing_stop(self, order, ltp: float) -> bool:
         """Check trailing stop based on retracement"""
         side = order.get_side()

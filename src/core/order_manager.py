@@ -27,7 +27,7 @@ class OrderManager(Subscriber, Publisher):
         # Subscribe to trading signal events - CRITICAL for receiving trading signals
         self.subscribe_to_event(EntrySignal, self.on_entry_signal)
         # self.subscribe_to_event(ExitSignal, self.on_exit_signal) ## exit manager is a wired service
-        # self.subscribe_to_event(QuoteEvent, self._on_ltp_update)
+        self.subscribe_to_event(QuoteEvent, self._on_ltp_update)
         # self.subscribe_to_event(CandleGenerated, self._on_candle_update)
         self._logger.info(f"✅ OrderManager subscribed to EntrySignal and ExitSignal events")
         
@@ -143,6 +143,10 @@ class OrderManager(Subscriber, Publisher):
         if quantity >= order.total_quantity:
             self._orders.pop(symbol, None)
 
+    def _on_ltp_update(self, event: QuoteEvent):
+        """Handle LTP update events."""
+        self.update_ltp(event.instrument, event.ltp, event.timestamp)
+
     def update_ltp(self, symbol: str, ltp: float, timestamp=None):
         """Update LTP and check for exits"""
         if symbol in self._orders:
@@ -153,6 +157,7 @@ class OrderManager(Subscriber, Publisher):
             if self._exit_manager:
                 exit_signal = self._exit_manager.check_exit(order, ltp, timestamp or datetime.now())
                 if exit_signal:
+                    self._logger.info(f"📉 Exit signal triggered for {symbol}: {exit_signal}")
                     self.handle_signal(exit_signal)
 
     def update_candle(self, symbol: str, candle: dict, timestamp=None):
