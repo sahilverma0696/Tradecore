@@ -2,13 +2,13 @@
   "BTCUSDT": {
     "symbol": "BTCUSDT",
     "timeframe": "5min",
-    "timestamp": "2025-09-02T22:58:00",
-    "open": 111172.66,
-    "high": 111176.13,
-    "low": 111172.65,
-    "close": 111176.12,
-    "volume": 2.9465800000000004,
-    "vwap": 111172.82799463486,
+    "timestamp": "2025-09-03T23:12:00",
+    "open": 112094.02,
+    "high": 112110.11,
+    "low": 112094.01,
+    "close": 112110.11,
+    "volume": 5.4929100000000055,
+    "vwap": 112108.63215455342,
     "is_complete": true,
     "source": "CandleMaker"
   }

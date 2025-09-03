@@ -145,19 +145,20 @@ class OrderManager(Subscriber, Publisher):
 
     def _on_ltp_update(self, event: QuoteEvent):
         """Handle LTP update events."""
-        self.update_ltp(event.instrument, event.ltp, event.timestamp)
+        if event.instrument in self._orders:
+            self.update_ltp(event)
 
-    def update_ltp(self, symbol: str, ltp: float, timestamp=None):
+    def update_ltp(self, event: QuoteEvent):
         """Update LTP and check for exits"""
-        if symbol in self._orders:
-            order = self._orders[symbol]
-            order.set_ltp(ltp, timestamp)
-            
+        if event.instrument in self._orders:
+            order = self._orders[event.instrument]
+            order.set_ltp(event.ltp, event.timestamp)
+
             # Check for exits using exit manager
             if self._exit_manager:
-                exit_signal = self._exit_manager.check_exit(order, ltp, timestamp or datetime.now())
+                exit_signal = self._exit_manager.check_exit(order,event)
                 if exit_signal:
-                    self._logger.info(f"📉 Exit signal triggered for {symbol}: {exit_signal}")
+                    self._logger.info(f"📉 Exit signal triggered for {event.instrument}: {exit_signal}")
                     self.handle_signal(exit_signal)
 
     def update_candle(self, symbol: str, candle: dict, timestamp=None):

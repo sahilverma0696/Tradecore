@@ -1,7 +1,8 @@
-from datetime import datetime
+from datetime import datetime, time
 from typing import Dict, Optional
 from src.logger_factory import get_logger
 from src.core.event_bus import Publisher, ExitSignal
+from src.core.event_bus import QuoteEvent
 
 
 class ExitManager(Publisher):
@@ -10,25 +11,44 @@ class ExitManager(Publisher):
                  exit_steps=None,
                  reterival_exit: float = 0.05,
                  default_quantity: int = 75,
-                 market_close=None):
+                 market_close: str = None):
         super().__init__()
         self.exit_steps = exit_steps or []
         self.reterival_exit = reterival_exit
         self.default_quantity = default_quantity
-        self.market_close = market_close
+        
+        # Convert market_close string to time object
+        self.market_close = self._parse_market_close_time(market_close)
+        
         self._logger = get_logger("ExitManager")
+        self._logger.info(f"ExitManager initialized with {len(self.exit_steps)} exit steps")
+        self._logger.info(f"Market close time: {self.market_close}")
 
-    def check_exit(self, order, ltp: float, timestamp: datetime) -> Optional[dict]:
+    def _parse_market_close_time(self, market_close_str: str) -> Optional[time]:
+        """Convert market close time string to datetime.time object."""
+        if not market_close_str:
+            return None
+        
+        try:
+            # Parse time string in format "HH:MM" 
+            hour, minute = map(int, market_close_str.split(':'))
+            return time(hour, minute)
+        except (ValueError, AttributeError) as e:
+            self._logger.error(f"Invalid market_close format '{market_close_str}': {e}")
+            return None
+
+    ## TODO: better to pass the event
+    def check_exit(self, order, event: QuoteEvent) -> Optional[dict]:
         """Check if order should exit and return exit signal"""
         
         # Check step exits
-        step_exit = self._check_step_exits(order, ltp)
+        step_exit = self._check_step_exits(order, event.ltp)
         if step_exit:
             exit_event = ExitSignal(
-                timestamp=timestamp,
+                timestamp=event.timestamp,
                 source=self.__class__.__name__,
                 symbol=order.get_name(),
-                exit_price=ltp,
+                exit_price=event.ltp,
                 exit_reason=step_exit,
                 quantity=self.default_quantity
             )
@@ -36,20 +56,20 @@ class ExitManager(Publisher):
             return {
                 'signal': 'EXIT',
                 'symbol': order.get_name(),
-                'exit_price': ltp,
+                'exit_price': event.ltp,
                 'exit_reason': step_exit,
                 'quantity': self.default_quantity,
-                'timestamp': timestamp
+                'timestamp': event.timestamp
             }
 
         # Check trailing stop
-        trail_exit = self._check_trailing_stop(order, ltp)
+        trail_exit = self._check_trailing_stop(order, event.ltp)
         if trail_exit:
             exit_event = ExitSignal(
-                timestamp=timestamp,
+                timestamp=event.timestamp,
                 source=self.__class__.__name__,
                 symbol=order.get_name(),
-                exit_price=ltp,
+                price=event.ltp,
                 exit_reason='TRAIL',
                 quantity=order.total_quantity
             )
@@ -69,7 +89,7 @@ class ExitManager(Publisher):
                 timestamp=timestamp,
                 source=self.__class__.__name__,
                 symbol=order.get_name(),
-                exit_price=ltp,
+                price=ltp,
                 exit_reason='TIME',
                 quantity=order.total_quantity
             )
@@ -77,7 +97,7 @@ class ExitManager(Publisher):
             return {
                 'signal': 'EXIT',
                 'symbol': order.get_name(),
-                'exit_price': ltp,
+                'price': ltp,
                 'exit_reason': 'TIME',
                 'quantity': order.total_quantity,
                 'timestamp': timestamp
@@ -113,19 +133,20 @@ class ExitManager(Publisher):
 
         return retrace >= self.reterival_exit
 
-    def _check_trailing_stop(self, symbol: str, price: float, position: dict, timestamp: datetime) -> bool:
-        """Trailing stop based on retracement percentage."""
-        side = position['side']
-        if position['remaining_qty'] <= 0:
-            return False
+    ## keeping it here because yet to finalize exit manager
+    # def _check_trailing_stop(self, symbol: str, price: float, position: dict, timestamp: datetime) -> bool:
+    #     """Trailing stop based on retracement percentage."""
+    #     side = position['side']
+    #     if position['remaining_qty'] <= 0:
+    #         return False
 
-        retrace = ((position['max_profit_price'] - price) / position['max_profit_price']) if side == 'BUY' \
-            else ((price - position['min_profit_price']) / position['min_profit_price'])
+    #     retrace = ((position['max_profit_price'] - price) / position['max_profit_price']) if side == 'BUY' \
+    #         else ((price - position['min_profit_price']) / position['min_profit_price'])
 
-        if retrace >= self.reterival_exit:
-            self._exit_position(symbol, price, timestamp, 'TRAIL', position, position['remaining_qty'])
-            return True
-        return False
+    #     if retrace >= self.reterival_exit:
+    #         self._exit_position(symbol, price, timestamp, 'TRAIL', position, position['remaining_qty'])
+    #         return True
+    #     return False
 
     def _exit_position(self, symbol: str, price: float, timestamp: datetime,
                       exit_type: str, position: dict, qty: int):

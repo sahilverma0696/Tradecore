@@ -68,30 +68,33 @@ class OrderObject:
 
     # ----------------- setters -----------------
     def set_ltp(self, ltp, timestamp=None):
+        self.logger.debug(f"Setting LTP for {self.name}: {ltp} at {timestamp}")
         self.ltp = ltp
         
         self._update_min_max_price(ltp)
         self._update_pct_stats()
         self.update_step()
         self.last_update_time = timestamp or datetime.now()
-        self._timestamp = self.last_update_time
+        self._timestamp = self.last_update_time # do we need this ?
         if self.entry_price == 0:
             self.entry_price = ltp
             self.entry_time = self.last_update_time
 
+    ## proof: just set the candle
     def set_current_candle(self, candle, timestamp=None):
         self.current_candle: CandleGenerated = candle
-        close_price = self.current_candle.close
-        if close_price > 0:
-            self.set_ltp(close_price, timestamp)
+        
 
+    ## proof
     def _update_min_max_price(self, price):
+        self.logger.debug(f"Updating min/max price for {self.name}: current price {price}, min price {self.min_price}, max price {self.max_price}") 
         if self.min_price == 0 or price < self.min_price:
             self.min_price = price
         if self.max_price == 0 or price > self.max_price:
             self.max_price = price
 
     def _update_pct_stats(self):
+        self.logger.debug(f"Updating pct stats for {self.name}")
         if not self.entry_price:
             return
 
@@ -115,7 +118,9 @@ class OrderObject:
         return self.trail[self.current_step_idx] if self.trail else 0
 
     def update_step(self):
+        self.logger.debug(f"Updating step for {self.name}: current step idx {self.current_step_idx}, current step {self.current_step}, current trail {self.current_trail}")
         if not self.step or not self.entry_price:
+            self.logger.warning(f"Cannot update step for {self.name}: step list or entry price is not set.")
             return
         price_move_pct = ((self.ltp - self.entry_price) / self.entry_price) if self.side == 'BUY' else ((self.entry_price - self.ltp) / self.entry_price)
         for i, s in enumerate(self.step):
@@ -123,6 +128,7 @@ class OrderObject:
                 self.current_step_idx = i
                 self.current_step = s
                 self.current_trail = self.trail[i] if i < len(self.trail) else self.trail[-1]
+        print(f"Updated step for {self.name}: current step idx {self.current_step_idx}, current step {self.current_step}, current trail {self.current_trail}")
 
     # convenience accessors
     def get_entry_price(self): return self.entry_price
