@@ -26,9 +26,13 @@ class OrderManager(Subscriber, Publisher):
         
         # Subscribe to trading signal events - CRITICAL for receiving trading signals
         self.subscribe_to_event(EntrySignal, self.on_entry_signal)
+        # TODO: exit manager directly being called, no need of signal event by bus talking
         # self.subscribe_to_event(ExitSignal, self.on_exit_signal) ## exit manager is a wired service
+        
+        # this is proof: OrderManager & OrderObject
         self.subscribe_to_event(QuoteEvent, self._on_ltp_update)
-        # self.subscribe_to_event(CandleGenerated, self._on_candle_update)
+        
+        self.subscribe_to_event(CandleGenerated, self._handle_update_candle)
         self._logger.info(f"✅ OrderManager subscribed to EntrySignal and ExitSignal events")
         
     def register_handler(self, cb):
@@ -143,6 +147,11 @@ class OrderManager(Subscriber, Publisher):
         if quantity >= order.total_quantity:
             self._orders.pop(symbol, None)
 
+    def _handle_update_candle(self, event: CandleGenerated):
+        """Handle candle update events."""
+        if event.instrument in self._orders:
+            self.update_candle(event.instrument, event.candle)
+
     def _on_ltp_update(self, event: QuoteEvent):
         """Handle LTP update events."""
         if event.instrument in self._orders:
@@ -155,15 +164,16 @@ class OrderManager(Subscriber, Publisher):
             order.set_ltp(event.ltp, event.timestamp)
 
             # Check for exits using exit manager
+            # TODO: this is remaining
             if self._exit_manager:
                 exit_signal = self._exit_manager.check_exit(order,event)
                 if exit_signal:
                     self._logger.info(f"📉 Exit signal triggered for {event.instrument}: {exit_signal}")
                     self.handle_signal(exit_signal)
 
-    def update_candle(self, symbol: str, candle: dict, timestamp=None):
+    def update_candle(self, symbol: str, candle: dict):
         if symbol in self._orders:
-            self._orders[symbol].set_current_candle(candle, timestamp)
+            self._orders[symbol].set_current_candle(candle)
 
     def has_order(self, symbol: str) -> bool:
         return symbol in self._orders

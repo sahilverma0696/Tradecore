@@ -1,12 +1,12 @@
 {
-  "timestamp": "2025-09-03T23:13:46.446852",
+  "timestamp": "2025-09-04T20:15:06.624919",
   "type": "QuoteEvent",
   "data": {
     "instrument": "BTCUSDT",
-    "ltp": 112110.11,
-    "ltq": 0.01209,
+    "ltp": 110089.39,
+    "ltq": 0.00045,
     "name": "btcusdt",
     "source": "BinanceStreamer",
-    "timestamp": "2025-09-03T23:13:46.320000"
+    "timestamp": "2025-09-04T20:15:06.538000"
   }
 }

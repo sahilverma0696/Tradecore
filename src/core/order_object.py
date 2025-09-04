@@ -81,7 +81,7 @@ class OrderObject:
             self.entry_time = self.last_update_time
 
     ## proof: just set the candle
-    def set_current_candle(self, candle, timestamp=None):
+    def set_current_candle(self, candle):
         self.current_candle: CandleGenerated = candle
         
 
