@@ -161,7 +161,7 @@ class OrderManager(Subscriber, Publisher):
         """Update LTP and check for exits"""
         if event.instrument in self._orders:
             order = self._orders[event.instrument]
-            order.set_ltp(event.ltp, event.timestamp or datetime.now())
+            order.set_ltp(event.ltp, event.timestamp)
 
             # Check for exits using exit manager
             if self._exit_manager:

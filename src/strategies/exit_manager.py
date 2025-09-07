@@ -3,6 +3,7 @@ from typing import Dict, Optional
 from src.logger_factory import get_logger
 from src.core.event_bus import Publisher, ExitSignal
 from src.core.event_bus import QuoteEvent
+from src.core.order_object import OrderObject
 
 
 class ExitManager(Publisher):
@@ -38,7 +39,7 @@ class ExitManager(Publisher):
             return None
 
     ## TODO: better to pass the event
-    def check_exit(self, order, event: QuoteEvent) -> ExitSignal:
+    def check_exit(self, order: OrderObject, event: QuoteEvent) -> ExitSignal:
         """Check if order should exit and return exit signal"""
         
         # Check step exits
@@ -49,8 +50,9 @@ class ExitManager(Publisher):
                 source=self.__class__.__name__,
                 symbol=order.get_name(),
                 exit_price=event.ltp,
-                exit_reason=step_exit,
-                quantity=self.default_quantity
+                exit_type=step_exit,
+                quantity=self.default_quantity,
+                direction='SELL' if order.get_side() == 'BUY' else 'BUY',
             )
             # self.publish_event(exit_event)
             # return {
@@ -71,38 +73,40 @@ class ExitManager(Publisher):
                 source=self.__class__.__name__,
                 symbol=order.get_name(),
                 price=event.ltp,
-                exit_reason='TRAIL',
-                quantity=order.total_quantity
+                exit_type='TRAIL',
+                quantity=order.total_quantity,
+                direction='SELL' if order.get_side() == 'BUY' else 'BUY',
             )
-            self.publish_event(exit_event)
-            return {
-                'signal': 'EXIT',
-                'symbol': order.get_name(),
-                'exit_price': ltp,
-                'exit_reason': 'TRAIL',
-                'quantity': order.total_quantity,
-                'timestamp': timestamp
-            }
+            # self.publish_event(exit_event)
+            # return {
+            #     'signal': 'EXIT',
+            #     'symbol': order.get_name(),
+            #     'exit_price': ltp,
+            #     'exit_reason': 'TRAIL',
+            #     'quantity': order.total_quantity,
+            #     'timestamp': timestamp
+            # }
 
         # Check time-based exit
-        if self.market_close and timestamp.time() >= self.market_close:
+        if self.market_close and event.timestamp.time() >= self.market_close:
             exit_event = ExitSignal(
-                timestamp=timestamp,
+                timestamp=event.timestamp,
                 source=self.__class__.__name__,
                 symbol=order.get_name(),
-                price=ltp,
-                exit_reason='TIME',
-                quantity=order.total_quantity
+                price=event.ltp,
+                exit_type='TIME',
+                quantity=order.total_quantity,
+                direction='SELL' if order.get_side() == 'BUY' else 'BUY',
             )
-            self.publish_event(exit_event)
-            return {
-                'signal': 'EXIT',
-                'symbol': order.get_name(),
-                'price': ltp,
-                'exit_reason': 'TIME',
-                'quantity': order.total_quantity,
-                'timestamp': timestamp
-            }
+            # self.publish_event(exit_event)
+            # return {
+            #     'signal': 'EXIT',
+            #     'symbol': order.get_name(),
+            #     'price': ltp,
+            #     'exit_reason': 'TIME',
+            #     'quantity': order.total_quantity,
+            #     'timestamp': timestamp
+            # }
 
         return None
 

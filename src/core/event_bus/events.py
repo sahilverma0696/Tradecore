@@ -74,7 +74,6 @@ class ExitSignal(Event):
     direction: str  # 'BUY' or 'SELL' 
     price: float
     quantity: int
-    strategy: str
     exit_type: str = "PROFIT"  # "PROFIT", "LOSS", "TIME"
     reason: str = ""
 
