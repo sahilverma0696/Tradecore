@@ -150,7 +150,7 @@ class OrderManager(Subscriber, Publisher):
     def _handle_update_candle(self, event: CandleGenerated):
         """Handle candle update events."""
         if event.symbol in self._orders:
-            self.update_candle(event.symbol, event.candle)
+            self.update_candle(event.symbol, event)
 
     def _on_ltp_update(self, event: QuoteEvent):
         """Handle LTP update events."""
@@ -170,7 +170,7 @@ class OrderManager(Subscriber, Publisher):
                     self._logger.info(f"📉 Exit signal triggered for {event.instrument}: {exit_event}")
                     self._handle_exit_signal(exit_event)
 
-    def update_candle(self, symbol: str, candle: dict):
+    def update_candle(self, symbol: str, candle: CandleGenerated):
         if symbol in self._orders:
             self._orders[symbol].set_current_candle(candle)
 
