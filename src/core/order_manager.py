@@ -106,10 +106,8 @@ class OrderManager(Subscriber, Publisher):
 
     def _handle_entry_signal(self, event: EntrySignal):
         """Handle entry signal from strategy"""
-        print(f"DEBUG: Printing complete event {event}")
         symbol = event.symbol
         side = event.direction
-        print(f"DEBUG: Handling entry signal for {symbol} side {side}")
 
         # Check if order already exists
         existing_order = self._orders.get(symbol)

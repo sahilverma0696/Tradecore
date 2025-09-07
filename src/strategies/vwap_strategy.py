@@ -26,8 +26,6 @@ class VwapStrategy(Subscriber, Publisher):
     def on_candle_generated(self, event: CandleGenerated):
         """Handle new candle events and generate trading signals."""
         try:
-            self.logger.info(f"💡 Received candle for {event.symbol}: Open={event.open}, Close={event.close}, VWAP={event.vwap}")
-
             # Process candle and generate signals
             self.process_candle(event)
             
@@ -66,7 +64,6 @@ class VwapStrategy(Subscriber, Publisher):
             'candle': event
         }
         self.positions[symbol] = entry_signal_data
-        self.logger.info(f"[ENTRY SIGNAL] {side} {symbol} @ {price} VWAP={vwap}")
         
         # Publish entry signal event
         entry_event = EntrySignal(
@@ -78,7 +75,6 @@ class VwapStrategy(Subscriber, Publisher):
             strategy="VWAPCommutative",
             candle=event
         )
-        self.logger.info(f"Publishing EntrySignal event: {asdict(entry_event)}")
         self.publish_event(entry_event)
 
     def get_active_positions(self) -> Dict[str, dict]:
