@@ -1,6 +1,4 @@
-Introduced the threadpool manager 
-now need to make the right base class and factory in streamer and execute, provide by factory 
-check registry sequence and others 
-from system config then systems input can be given
-upstox is the starting we;re going with
-sleep manager to be introduced as well
+- Better traces in event bus : maybe reduce other logging
+- live_order.json: to check if it is becoming before order trigger
+- IPC making a lots of load on system, to be shot using the threadpool only
+- good work so far

@@ -128,7 +128,6 @@ class OrderObject:
                 self.current_step_idx = i
                 self.current_step = s
                 self.current_trail = self.trail[i] if i < len(self.trail) else self.trail[-1]
-        print(f"Updated step for {self.name}: current step idx {self.current_step_idx}, current step {self.current_step}, current trail {self.current_trail}")
 
     # convenience accessors
     def get_entry_price(self): return self.entry_price

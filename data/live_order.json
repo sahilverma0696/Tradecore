@@ -1,5 +1,5 @@
 {
-  "timestamp": "2025-09-07T22:44:54.511110",
+  "timestamp": "2025-09-07T22:57:22.462202",
   "total_orders": 1,
   "orders": [
     {
@@ -7,14 +7,14 @@
       "instrument": "BTCUSDT",
       "side": "SELL",
       "quantity": 75,
-      "entry_price": 111131.24,
-      "current_ltp": 111131.24,
-      "current_pct": 0.0,
+      "entry_price": 111067.32,
+      "current_ltp": 111067.3,
+      "current_pct": 1.8007096960721243e-05,
       "retreat": 0.0,
       "current_trail": 0.3,
-      "max_pct": 0.0,
-      "entry_time": "2025-09-07T22:44:00.237317",
-      "last_update": "2025-09-07T22:44:54.511096",
+      "max_pct": 1.8007096960721243e-05,
+      "entry_time": "2025-09-07T22:56:02.387290",
+      "last_update": "2025-09-07T22:57:22.462183",
       "status": "ACTIVE",
       "exit_steps": [
         0.02,
