@@ -38,7 +38,7 @@ class ExitManager(Publisher):
             return None
 
     ## TODO: better to pass the event
-    def check_exit(self, order, event: QuoteEvent) -> Optional[dict]:
+    def check_exit(self, order, event: QuoteEvent) -> ExitSignal:
         """Check if order should exit and return exit signal"""
         
         # Check step exits
@@ -52,15 +52,16 @@ class ExitManager(Publisher):
                 exit_reason=step_exit,
                 quantity=self.default_quantity
             )
-            self.publish_event(exit_event)
-            return {
-                'signal': 'EXIT',
-                'symbol': order.get_name(),
-                'exit_price': event.ltp,
-                'exit_reason': step_exit,
-                'quantity': self.default_quantity,
-                'timestamp': event.timestamp
-            }
+            # self.publish_event(exit_event)
+            # return {
+            #     'signal': 'EXIT',
+            #     'symbol': order.get_name(),
+            #     'exit_price': event.ltp,
+            #     'exit_reason': step_exit,
+            #     'quantity': self.default_quantity,
+            #     'timestamp': event.timestamp
+            # }
+            return exit_event
 
         # Check trailing stop
         trail_exit = self._check_trailing_stop(order, event.ltp)

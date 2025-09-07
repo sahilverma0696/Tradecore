@@ -111,12 +111,12 @@ class OrderManager(Subscriber, Publisher):
             except Exception as e:
                 self._logger.error(f"Handler error: {e}")
 
-    def _handle_exit_signal(self, signal_data):
+    def _handle_exit_signal(self, exit_event: ExitSignal):
         """Handle exit signal from exit manager"""
-        symbol = signal_data['symbol']
-        exit_price = signal_data['exit_price']
-        exit_reason = signal_data['exit_reason']
-        quantity = signal_data.get('quantity', 0)
+        symbol = exit_event.symbol
+        exit_price = exit_event.exit_price
+        exit_reason = exit_event.exit_reason
+        quantity = exit_event.quantity
         
         self._exit_order(symbol, exit_price, datetime.now(), exit_reason, quantity)
 
@@ -149,8 +149,8 @@ class OrderManager(Subscriber, Publisher):
 
     def _handle_update_candle(self, event: CandleGenerated):
         """Handle candle update events."""
-        if event.instrument in self._orders:
-            self.update_candle(event.instrument, event.candle)
+        if event.symbol in self._orders:
+            self.update_candle(event.symbol, event.candle)
 
     def _on_ltp_update(self, event: QuoteEvent):
         """Handle LTP update events."""
@@ -161,15 +161,14 @@ class OrderManager(Subscriber, Publisher):
         """Update LTP and check for exits"""
         if event.instrument in self._orders:
             order = self._orders[event.instrument]
-            order.set_ltp(event.ltp, event.timestamp)
+            order.set_ltp(event.ltp, event.timestamp or datetime.now())
 
             # Check for exits using exit manager
-            # TODO: this is remaining
             if self._exit_manager:
-                exit_signal = self._exit_manager.check_exit(order,event)
-                if exit_signal:
-                    self._logger.info(f"📉 Exit signal triggered for {event.instrument}: {exit_signal}")
-                    self.handle_signal(exit_signal)
+                exit_event = self._exit_manager.check_exit(order, event)
+                if exit_event:
+                    self._logger.info(f"📉 Exit signal triggered for {event.instrument}: {exit_event}")
+                    self._handle_exit_signal(exit_event)
 
     def update_candle(self, symbol: str, candle: dict):
         if symbol in self._orders:
@@ -204,5 +203,6 @@ class OrderManager(Subscriber, Publisher):
             self.handle_exit_signal(event)
             
         except Exception as e:
+            self._logger.error(f"Error handling exit signal: {e}")
             self._logger.error(f"Error handling exit signal: {e}")
             self._logger.error(f"Error handling exit signal: {e}")
