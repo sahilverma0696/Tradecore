@@ -1,5 +1,7 @@
 from typing import Dict
 from datetime import datetime
+import json
+import os
 from src.core.event_bus import Subscriber, Publisher, EntrySignal, ExitSignal, OrderExecuted
 from src.core.event_bus.events import CandleGenerated, QuoteEvent
 from src.logger_factory import get_logger
@@ -18,6 +20,9 @@ class OrderManager(Subscriber, Publisher):
         self._handlers = []  # callback for order execution
         self._exit_manager = None  # Will be set from main.py
         
+        # IPC file for live order data
+        self._live_order_file = "data/live_order.json"
+
         # Load trading configuration
         self._config_manager = ConfigManager()
         self._trading_config = self._config_manager.get()
@@ -61,6 +66,44 @@ class OrderManager(Subscriber, Publisher):
         # Fall back to default quantity
         return quantities.get('default', self._trading_config.get('default_quantity', 75))
         
+    def _write_live_order_data(self):
+        """Write current live order data to JSON file for IPC with CLI dashboard."""
+        try:
+            live_orders = []
+            
+            for symbol, order in self._orders.items():
+                order_data = {
+                    "symbol": symbol,
+                    "instrument": order.get_instrument(),
+                    "side": order.get_side(),
+                    "quantity": order.total_quantity,
+                    "entry_price": order.get_entry_price(),
+                    "current_ltp": order.get_ltp(),
+                    "current_pct": order.get_current_pct(),
+                    "retreat": order.get_retreat(),
+                    "current_trail": order.get_current_trail(),
+                    "max_pct": order.get_max_pct(),
+                    "entry_time": order.get_entry_time().isoformat() if order.get_entry_time() else None,
+                    "last_update": datetime.now().isoformat(),
+                    "status": "ACTIVE",
+                    "exit_steps": order.step if hasattr(order, 'step') else [],
+                    "trail_steps": order.trail if hasattr(order, 'trail') else []
+                }
+                live_orders.append(order_data)
+            
+            # Write to IPC file
+            ipc_data = {
+                "timestamp": datetime.now().isoformat(),
+                "total_orders": len(live_orders),
+                "orders": live_orders
+            }
+            
+            with open(self._live_order_file, 'w') as f:
+                json.dump(ipc_data, f, indent=2)
+            
+        except Exception as e:
+            self._logger.error(f"Error writing live order data: {e}")
+
     def _handle_entry_signal(self, event: EntrySignal):
         """Handle entry signal from strategy"""
         print(f"DEBUG: Printing complete event {event}")
@@ -101,6 +144,9 @@ class OrderManager(Subscriber, Publisher):
         self._orders[symbol] = order # to be made atomic
         self._logger.info(f"Created order {symbol} {side} @ {event.price} (Qty: {quantity}, Steps: {len(exit_steps)})")
         self._order_logger.log_entry(order)
+        
+        # Update live order IPC file
+        self._write_live_order_data()
         
         # Execute order
         for cb in self._handlers:
@@ -146,6 +192,9 @@ class OrderManager(Subscriber, Publisher):
         # Remove order if fully exited
         if quantity >= order.total_quantity:
             self._orders.pop(symbol, None)
+        
+        # Update live order IPC file after exit
+        self._write_live_order_data()
 
     def _handle_update_candle(self, event: CandleGenerated):
         """Handle candle update events."""
@@ -162,6 +211,9 @@ class OrderManager(Subscriber, Publisher):
         if event.instrument in self._orders:
             order = self._orders[event.instrument]
             order.set_ltp(event.ltp, event.timestamp)
+
+            # Update live order IPC file when LTP changes
+            self._write_live_order_data()
 
             # Check for exits using exit manager
             if self._exit_manager:
