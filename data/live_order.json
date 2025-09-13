@@ -1,5 +1,5 @@
 {
-  "timestamp": "2025-09-13T19:08:18.982348",
+  "timestamp": "2025-09-13T19:11:23.309130",
   "total_orders": 1,
   "orders": [
     {
@@ -9,16 +9,16 @@
       "total_quantity": 260,
       "current_quantity": 0,
       "remaining_quantity": 260,
-      "entry_price": 115458.52,
+      "entry_price": 115527.52,
       "current_trail": 0.01,
-      "current_ltp": 115433.09,
-      "current_profit_percentage": 0.022025226029233326,
-      "current_profit": 25.430000000007567,
+      "current_ltp": 115527.52,
+      "current_profit_percentage": 0.0,
+      "current_profit": 0.0,
       "retreat": 0.0,
-      "max_move_percentage": 0.022025226029233326,
-      "min_move_percentage": 0.0,
-      "entry_time": "2025-09-13T19:07:00.247610",
-      "last_update": "2025-09-13T19:08:18.982329",
+      "max_move_percentage": 0.0,
+      "min_move_percentage": -8.655946215032843e-06,
+      "entry_time": "2025-09-13T19:10:00.158100",
+      "last_update": "2025-09-13T19:11:23.309113",
       "status": "ACTIVE",
       "exit_steps": [
         0.002,

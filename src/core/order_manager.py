@@ -223,8 +223,8 @@ class OrderManager(Subscriber, Publisher):
             order = self._orders[event.instrument]
             order.set_ltp(event.ltp, event.timestamp)
 
-            # Update live order IPC file when LTP changes
-            self._write_live_order_data()
+            # write through thread pool
+            self._thread_manager.submit(self._write_live_order_data)
 
             # Check for exits using exit manager
             if self._exit_manager:
@@ -250,7 +250,7 @@ class OrderManager(Subscriber, Publisher):
         """Handle entry signal events."""
         try:
             # self._logger.info(f"📋 Received entry signal for {event.symbol}: {event.direction} at {event.price}")
-            print(f"DEBUG: on_entry_signal received for {event.symbol} side {event.direction}")
+            # print(f"DEBUG: on_entry_signal received for {event.symbol} side {event.direction}")
             # Process entry signal and place order
             self._handle_entry_signal(event)
             
