@@ -1,23 +1,33 @@
 {
-  "timestamp": "2025-09-11T20:34:15.988534",
+  "timestamp": "2025-09-13T19:08:18.982348",
   "total_orders": 1,
   "orders": [
     {
       "symbol": "BTCUSDT",
       "instrument": "BTCUSDT",
-      "side": "BUY",
-      "quantity": 75,
-      "entry_price": 114406.97,
-      "current_ltp": 114406.98,
-      "current_profit_percentage": 8.740726194183195e-6,
+      "side": "SELL",
+      "total_quantity": 260,
+      "current_quantity": 0,
+      "remaining_quantity": 260,
+      "entry_price": 115458.52,
+      "current_trail": 0.01,
+      "current_ltp": 115433.09,
+      "current_profit_percentage": 0.022025226029233326,
+      "current_profit": 25.430000000007567,
       "retreat": 0.0,
-      "current_trail": 0.3,
-      "max_move_percentage": 8.740726194183195e-6,
-      "entry_time": "2025-09-11T20:34:01.024245",
-      "last_update": "2025-09-11T20:34:15.988523",
+      "max_move_percentage": 0.022025226029233326,
+      "min_move_percentage": 0.0,
+      "entry_time": "2025-09-13T19:07:00.247610",
+      "last_update": "2025-09-13T19:08:18.982329",
       "status": "ACTIVE",
-      "exit_steps": [0.002, 0.004, 0.005, 0.007, 0.01, 0.015, 0.02, 0.3],
-      "trail_steps": [0.3, 0.3, 0.3, 0.3, 0.3, 0.3, 0.3, 0.3]
+      "exit_steps": [
+        0.002,
+        0.004,
+        0.005,
+        0.007,
+        0.01
+      ],
+      "trail_steps": 0.01
     }
   ]
 }

@@ -53,11 +53,11 @@ class OrderManager(Subscriber, Publisher):
         """Get exit steps from trading config."""
         return self._trading_config.get('exit_steps')
     
-    def _get_quantity_from_config(self, symbol: str = None) -> list:
+    def _get_quantity_from_config(self) -> list:
         """Get quantity array from trading config for a specific symbol."""
-        quantities = self._trading_config.get('execution', {}).get('quantities', {})
-        return quantities.get(symbol.upper(), quantities.get('default', self._trading_config.get('default_quantity', 75)))
-
+        quantities = self._trading_config.get('quantities')
+        return quantities
+    
     def _get_trail_from_config(self, symbol: str = None) -> list:
         """Get trail array from trading config"""
         return self._trading_config.get('trails')
@@ -65,6 +65,9 @@ class OrderManager(Subscriber, Publisher):
     def _write_live_order_data(self):
         """Write current live order data to JSON file for IPC with CLI dashboard."""
         try:
+            # Ensure data directory exists
+            os.makedirs("data", exist_ok=True)
+            
             live_orders = []
             
             for symbol, order in self._orders.items():
@@ -98,11 +101,19 @@ class OrderManager(Subscriber, Publisher):
                 "orders": live_orders
             }
             
-            with open(self._live_order_file, 'w') as f:
+            # Write with absolute path for debugging
+            file_path = os.path.abspath("data/live_order.json")
+            # self._logger.info(f"Writing live order data to: {file_path}")
+            
+            with open("data/live_order.json", 'w') as f:
                 json.dump(ipc_data, f, indent=2)
+            
+            # self._logger.info(f"Successfully wrote live order data for {len(live_orders)} orders")
             
         except Exception as e:
             self._logger.error(f"Error writing live order data: {e}")
+            import traceback
+            self._logger.error(f"Traceback: {traceback.format_exc()}")
 
     def _handle_entry_signal(self, event: EntrySignal):
         """Handle entry signal from strategy"""
@@ -122,9 +133,8 @@ class OrderManager(Subscriber, Publisher):
 
         # Get configuration values from trading config
         exit_steps = self._get_exit_steps_from_config()
-        quantity = self._get_quantity_from_config(symbol)
+        quantity = self._get_quantity_from_config()
         trail_list = self._get_trail_from_config()
-        print(type(trail_list))
         # Create new order
         try:
             order = OrderObject(
@@ -139,6 +149,7 @@ class OrderManager(Subscriber, Publisher):
         except Exception as e:
             print(f"DEBUG: Error creating OrderObject: {e}")
             self._logger.error(f"Error creating OrderObject: {e}")
+            return
             
 
         self._orders[symbol] = order # to be made atomic
@@ -238,7 +249,7 @@ class OrderManager(Subscriber, Publisher):
     def on_entry_signal(self, event: EntrySignal):
         """Handle entry signal events."""
         try:
-            self._logger.info(f"📋 Received entry signal for {event.symbol}: {event.direction} at {event.price}")
+            # self._logger.info(f"📋 Received entry signal for {event.symbol}: {event.direction} at {event.price}")
             print(f"DEBUG: on_entry_signal received for {event.symbol} side {event.direction}")
             # Process entry signal and place order
             self._handle_entry_signal(event)

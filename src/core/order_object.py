@@ -22,6 +22,7 @@ class OrderObject:
         self.total_quantity = sum(self.quantity)  # total quantity, sum of quantity
         self.remaining_quantity = 0  # quantity filled in the current step
         self.filled_quantity = 0
+        self.current_quantity = 0  # quantity filled so far
 
         self.logger.debug(f"Creating OrderObject: {name}, Instrument: {instrument}, Side: {side}, Step: {self.step}, Trail: {self.trail}, Quantity: {self.quantity}")
 
@@ -38,8 +39,8 @@ class OrderObject:
         self.max_price = self.entry_price if self.entry_price > 0 else 0
         if(self.min_price == 0 or self.max_price == 0):
             self.logger.warning(f"Min/Max price initialized to 0 for order {name}, please check the entry price.")
-        self.logger.debug(f"OrderObject initialized with entry price: {self.entry_price}, min price: {self.min_price}, max price: {self.max_price}")
-        self.logger.debug(f"OrderObject {name} created with side {self.side}, entry price {self.entry_price}, step {self.step}, trail {self.trail}")
+        # self.logger.debug(f"OrderObject initialized with entry price: {self.entry_price}, min price: {self.min_price}, max price: {self.max_price}")
+        # self.logger.debug(f"OrderObject {name} created with side {self.side}, entry price {self.entry_price}, step {self.step}, trail {self.trail}")
 
         # Performance tracking (NEW)
         self.max_move_percentage = 0.0  # highest favorable movement %
@@ -87,14 +88,14 @@ class OrderObject:
 
     ## proof
     def _update_min_max_price(self, price):
-        self.logger.debug(f"Updating min/max price for {self.name}: current price {price}, min price {self.min_price}, max price {self.max_price}") 
+        # self.logger.debug(f"Updating min/max price for {self.name}: current price {price}, min price {self.min_price}, max price {self.max_price}") 
         if self.min_price == 0 or price < self.min_price:
             self.min_price = price
         if self.max_price == 0 or price > self.max_price:
             self.max_price = price
 
     def _update_pct_stats(self):
-        self.logger.debug(f"Updating pct stats for {self.name}")
+        # self.logger.debug(f"Updating pct stats for {self.name}")
         if not self.entry_price:
             return
 
