@@ -45,6 +45,11 @@
     [0.02, 0.3],
     [0.3, 0.3]
   ],
+  "trails":[
+    0.01,
+    0.02,
+    0.03
+  ],
   "reterival_exit": 0.1,
   "market_close_time": "13:39",
   "default_quantity": 75,

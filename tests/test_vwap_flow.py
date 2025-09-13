@@ -17,7 +17,7 @@ class TestVWAPFlow(unittest.TestCase):
         self.config = {
             "exit_steps": [(0.02, 0.5), (0.04, 0.5)],
             "market_close_time": "15:30",
-            "exit_max_pct": 0.01,
+            "exit_max_move_percentage": 0.01,
             "default_quantity": 10,
             "name_symbol": {"TEST": "TESTSYM"},
         }

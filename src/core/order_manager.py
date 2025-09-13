@@ -51,21 +51,17 @@ class OrderManager(Subscriber, Publisher):
     
     def _get_exit_steps_from_config(self) -> list:
         """Get exit steps from trading config."""
-        return self._trading_config.get('exit_steps', [[0.02, 0.3], [0.04, 0.3]])
+        return self._trading_config.get('exit_steps')
     
-    def _get_quantity_from_config(self, symbol: str = None) -> int:
-        """Get quantity from trading config based on symbol or use default."""
+    def _get_quantity_from_config(self, symbol: str = None) -> list:
+        """Get quantity array from trading config for a specific symbol."""
         quantities = self._trading_config.get('execution', {}).get('quantities', {})
-        
-        # Try symbol-specific quantity first
-        if symbol:
-            symbol_key = symbol.upper()
-            if symbol_key in quantities:
-                return quantities[symbol_key]
-        
-        # Fall back to default quantity
-        return quantities.get('default', self._trading_config.get('default_quantity', 75))
-        
+        return quantities.get(symbol.upper(), quantities.get('default', self._trading_config.get('default_quantity', 75)))
+
+    def _get_trail_from_config(self, symbol: str = None) -> list:
+        """Get trail array from trading config"""
+        return self._trading_config.get('trails')
+
     def _write_live_order_data(self):
         """Write current live order data to JSON file for IPC with CLI dashboard."""
         try:
@@ -76,13 +72,17 @@ class OrderManager(Subscriber, Publisher):
                     "symbol": symbol,
                     "instrument": order.get_instrument(),
                     "side": order.get_side(),
-                    "quantity": order.total_quantity,
+                    "total_quantity": order.get_total_quantity(),
+                    "current_quantity": order.get_current_quantity(),
+                    "remaining_quantity": order.get_remaining_quantity(),
                     "entry_price": order.get_entry_price(),
-                    "current_ltp": order.get_ltp(),
-                    "current_pct": order.get_current_pct(),
-                    "retreat": order.get_retreat(),
                     "current_trail": order.get_current_trail(),
-                    "max_pct": order.get_max_pct(),
+                    "current_ltp": order.get_ltp(),
+                    "current_profit_percentage": order.get_current_profit_percentage(),
+                    "current_profit": order.get_current_profit(),
+                    "retreat": order.get_retreat(),
+                    "max_move_percentage": order.get_max_move_percentage(),
+                    "min_move_percentage": order.get_min_move_percentage(),
                     "entry_time": order.get_entry_time().isoformat() if order.get_entry_time() else None,
                     "last_update": datetime.now().isoformat(),
                     "status": "ACTIVE",
@@ -123,17 +123,19 @@ class OrderManager(Subscriber, Publisher):
         # Get configuration values from trading config
         exit_steps = self._get_exit_steps_from_config()
         quantity = self._get_quantity_from_config(symbol)
+        trail_list = self._get_trail_from_config()
+        print(type(trail_list))
         # Create new order
         try:
             order = OrderObject(
                 name=symbol,
                 instrument=event.symbol,
                 step=[s[0] for s in exit_steps], 
-                trail=[s[1] for s in exit_steps],
+                trail=trail_list,
                 side=side,
+                quantity=quantity,
                 candle=event.candle
             )
-            order.total_quantity = quantity
         except Exception as e:
             print(f"DEBUG: Error creating OrderObject: {e}")
             self._logger.error(f"Error creating OrderObject: {e}")
