@@ -17,6 +17,12 @@ This system is built on a **thread-managed event-driven architecture** with the 
 - **Publisher/Subscriber Pattern**: Components inherit from mixins for event handling
 - **Typed Events**: Strongly typed event system (QuoteEvent, CandleGenerated, etc.)
 
+### Integrated Order Management
+- **OrderObject with Exit Logic**: Orders manage their own exit conditions via ExitManager library
+- **Real-time Exit Detection**: Exit conditions checked on every LTP update
+- **Step-based Exits**: Automatic partial exits when profit targets are reached
+- **Integrated Performance Tracking**: Real-time profit/loss and retreat calculations
+
 ### Factory Pattern Components
 - **Dynamic Creation**: Components created based on configuration files
 - **Multiple Brokers**: Support for Zerodha, Binance, and mock trading
@@ -47,8 +53,8 @@ cp system_config.json.example system_config.json
 #### Live Trading Mode
 ```bash
 # Configure system_config.json with:
-# "streamer": {"type": "zerodha"}
-# "executor": {"type": "zerodha"}
+# "streamer": {"type": "binance"}
+# "executor": {"type": "mock"}
 
 python3 -m src.main
 ```
@@ -56,7 +62,7 @@ python3 -m src.main
 #### Paper Trading Mode
 ```bash
 # Configure system_config.json with:
-# "streamer": {"type": "zerodha"}
+# "streamer": {"type": "binance"}
 # "executor": {"type": "mock"}
 
 python3 -m src.main
@@ -76,6 +82,38 @@ Run the CLI dashboard in a separate terminal:
 ```bash
 python3 -m src.cli.cli_main          # Live dashboard
 python3 -m src.cli.cli_main --demo   # Demo mode
+```
+
+## 🔄 Current System Flow
+
+### Market Data to Order Execution
+```
+BinanceStreamer → QuoteEvent → CandleMaker → CandleGenerated → VwapStrategy → EntrySignal → OrderManager
+                                                                                              ↓
+                                                                        OrderObject (with ExitManager) ← LTP Updates
+                                                                                              ↓
+                                                                                         Exit Detection
+                                                                                              ↓
+                                                                                        Order Execution
+```
+
+### Real-time Order Management
+```
+QuoteEvent (LTP Update)
+    ↓
+OrderObject.set_ltp()
+    ↓
+ExitManager.check_exit_conditions()
+    ├── Trail Exit Check
+    ├── Stop Loss Check  
+    ├── Step Exit Check
+    └── Market Close Check (disabled)
+    ↓
+Return Exit Info (if triggered)
+    ↓
+OrderManager.handle_exit()
+    ↓
+Execute Exit Order
 ```
 
 ## 🧪 Testing
@@ -100,10 +138,6 @@ python3 -m unittest tests.test_thread_manager_performance -v
 
 # Stress tests
 python3 -m unittest tests.test_thread_manager_stress -v
-
-# Run specific test methods
-python3 -m unittest tests.test_thread_manager.TestThreadManager.test_singleton_pattern
-python3 -m unittest tests.test_thread_manager.TestThreadManager.test_thread_safe_singleton
 ```
 
 ### Component Tests
@@ -120,139 +154,112 @@ python3 -m unittest tests.test_vwap_flow -v
 python3 -m unittest tests.test_candle_maker -v
 ```
 
-### Performance Testing
-```bash
-# Thread manager performance under load
-python3 -m unittest tests.test_thread_manager_performance.TestThreadManagerPerformance.test_high_volume_task_submission -v
+## 📋 Current System Configuration
 
-# Concurrent pool usage
-python3 -m unittest tests.test_thread_manager_performance.TestThreadManagerPerformance.test_concurrent_pool_usage -v
-
-# Memory usage monitoring
-python3 -m unittest tests.test_thread_manager_performance.TestThreadManagerPerformance.test_memory_usage_under_load -v
-```
-
-### Stress Testing
-```bash
-# Exception handling under load
-python3 -m unittest tests.test_thread_manager_stress.TestThreadManagerStress.test_exception_handling_stress -v
-
-# Thread pool saturation
-python3 -m unittest tests.test_thread_manager_stress.TestThreadManagerStress.test_thread_pool_saturation -v
-
-# Mixed chaotic workload
-python3 -m unittest tests.test_thread_manager_stress.TestThreadManagerStress.test_mixed_workload_chaos -v
-```
-
-## 📋 Test Coverage Areas
-
-### ThreadManager Tests
-- **Singleton Pattern**: Thread-safe singleton creation and access
-- **Pool Management**: Thread pool initialization and configuration
-- **Task Submission**: Sync and async task handling
-- **Error Handling**: Exception propagation and recovery
-- **Performance**: High-volume task processing
-- **Stress Testing**: Edge cases and failure scenarios
-- **Memory Management**: Memory usage under sustained load
-
-### Integration Tests
-- **Event Flow**: End-to-end event propagation
-- **Component Wiring**: Factory-created component interaction
-- **Configuration**: Dynamic component creation based on config
-- **Graceful Shutdown**: Clean system termination
-
-## 🔧 Configuration
-
-For comprehensive configuration options, see **[CONFIG_OPTIONS.md](CONFIG_OPTIONS.md)** - Complete reference of all available settings.
-
-### Quick Configuration Examples
-
-#### Basic Offline Testing Setup
+### Essential System Configuration
 ```json
 // system_config.json
 {
   "threading": {
     "event_bus_workers": 2,
     "streamer_workers": 4,
-    "strategy_workers": 2
+    "strategy_workers": 2,
+    "executor_workers": 2,
+    "system_workers": 2
   },
-  "streamer": {"type": "offline"},
-  "executor": {"type": "mock"},
-  "logging": {"console_output": true}
-}
-
-// trading_config.json  
-{
-  "symbols": ["260105"],
-  "name_symbol": "NIFTY_50",
-  "paper_trade": true,
-  "default_quantity": 75,
-  "exit_steps": [[0.02, 0.3], [0.04, 0.3]]
-}
-```
-
-#### Live Trading Setup
-```json
-// system_config.json
-{
-  "streamer": {"type": "zerodha", "async_enabled": true},
-  "executor": {"type": "zerodha"},
-  "logging": {"level": "INFO", "console_output": true}
-}
-
-// trading_config.json
-{
-  "symbols": ["260105"],
-  "api_key": "your_api_key",
-  "api_secret": "your_api_secret",
-  "paper_trade": false,
-  "risk_management": {
-    "max_daily_loss": 50000,
-    "max_daily_trades": 50
+  "streamer": {
+    "type": "binance",
+    "async_enabled": true
+  },
+  "executor": {
+    "type": "mock"
+  },
+  "logging": {
+    "level": "INFO",
+    "console_output": true
   }
 }
 ```
 
-### Configuration Files Overview
+### Trading Configuration
+```json
+// trading_config.json
+{
+  "symbols": ["btcusdt"],
+  "name_symbol": "btcusdt",
+  "paper_trade": true,
+  "exit_steps": [
+    [0.002, 0.3],
+    [0.004, 0.3],
+    [0.005, 0.3],
+    [0.007, 0.3],
+    [0.01, 0.3]
+  ],
+  "quantities": [100, 75, 50, 25, 10],
+  "trails": [0.01, 0.02, 0.03],
+  "reterival_exit": 0.1
+}
+```
 
-- **`system_config.json`**: Thread pools, streamers, executors, logging, performance settings
-- **`trading_config.json`**: Symbols, strategies, risk management, API credentials, exit rules
-- **`CONFIG_OPTIONS.md`**: Complete reference with all available options and examples
+## 📊 Live Order Monitoring
 
-## 📊 Performance Monitoring
+The system provides real-time order monitoring through:
 
-The system provides real-time monitoring through:
-
-- **Thread Pool Statistics**: Monitor active/completed/failed tasks across all pools
+- **Live Order JSON**: `data/live_order.json` contains real-time order information
 - **Console Logging**: Real-time system status with configurable verbosity
 - **Event Bus Metrics**: Track event throughput and processing latency
-- **Memory Usage**: Monitor memory consumption under load
-- **Component Health**: Check status of streamers, strategies, and executors
+- **Order Performance**: Real-time profit/loss, retreat, and step tracking
 
-### Monitoring Commands
-```bash
-# Enable console logging for real-time monitoring
-# Set "logging.console_output": true in system_config.json
-
-# View thread pool statistics programmatically
-python3 -c "
-from src.core.thread_manager import ThreadManager
-tm = ThreadManager()
-tm.initialize_pools()
-print(tm.get_pool_stats())
-"
-
-# Monitor system with CLI dashboard
-python3 -m src.cli.cli_main
+### Live Order Data Structure
+```json
+{
+  "timestamp": "2025-09-13T20:46:00.235845",
+  "total_orders": 1,
+  "orders": [
+    {
+      "symbol": "BTCUSDT",
+      "side": "SELL",
+      "total_quantity": 265,
+      "current_quantity": 265,
+      "entry_price": 111131.24,
+      "current_ltp": 111259.98,
+      "current_profit_percentage": -0.115,
+      "retreat": 0.0,
+      "max_move_percentage": 0.0,
+      "status": "ACTIVE",
+      "exit_steps": [0.002, 0.004, 0.005, 0.007, 0.01],
+      "trail_steps": 0.01
+    }
+  ]
+}
 ```
+
+## 🎯 Key System Features
+
+### Integrated Exit Management
+- **Library Pattern**: ExitManager used as library by OrderObject
+- **Real-time Detection**: Exit conditions checked on every LTP update  
+- **Multiple Exit Types**: Trail, stop-loss, step-based, and time-based exits
+- **Performance Metrics**: Real-time calculation of profit, retreat, and maximum movement
+
+### Thread-Safe Architecture
+- **Centralized Threading**: All concurrent operations via ThreadManager
+- **Event-Driven**: Components communicate only through EventBus
+- **Factory Creation**: Dynamic component instantiation based on configuration
+- **Live Data Writing**: Real-time IPC file updates for dashboard integration
+
+### Current Supported Markets
+- **Cryptocurrency**: Binance WebSocket streaming for BTCUSDT and other pairs
+- **Demo Mode**: Offline streamer for testing and development
+- **Mock Execution**: Paper trading with realistic order simulation
 
 ## 🚨 Important Notes
 
+- **Real-time Exit Logic**: Orders automatically detect exit conditions during LTP updates
 - **Thread Safety**: All components designed for concurrent access via ThreadManager
 - **Event-Driven**: Use EventBus for all inter-component communication
-- **Factory Pattern**: Always use factories for component creation
 - **Configuration-Driven**: System behavior controlled via JSON configs
+- **Live Monitoring**: Real-time order data available via `data/live_order.json`
 - **Console Logging**: Enable `console_output: true` for real-time monitoring
-- **Testing**: Comprehensive test coverage ensures system reliability
 
 For detailed architectural information and development guidelines, see **[LLM_README.md](LLM_README.md)**.

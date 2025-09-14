@@ -1,250 +1,182 @@
 from datetime import datetime
 from src.core.event_bus.events import CandleGenerated
 from src.logger_factory import get_logger
+from src.core.exit_manager import ExitManager
 from typing import Optional, Dict, Any
 
 
-
 class OrderObject:
-    def __init__(self, name, instrument, step, trail, side, quantity, candle=None):
+    def __init__(self, name, instrument, step, trail, side, quantity, candle: CandleGenerated):
+        # no default values, the system expects to be having values from config
+        # else it fails
+        # basic information
         self.logger = get_logger(f"InitOrderObject-{name}")
-        self.name = name
-        self.instrument = instrument
-        self.side = side.upper()  # 'BUY' or 'SELL'
-        self.step = step or []          # this is a percentage quantity, going with step profits, and step quantities
-        self.trail = trail[0] if isinstance(trail, list) and trail else trail or 0.005       # this is a percentage quantity,going with one trail exit, flushes all remaining quantity, so using just [0]
-        self.current_step_idx = 0
-        self.current_step = self.step[0] if self.step else 0.05
-        self.current_trail = self.trail
-        self.current_candle: CandleGenerated = candle
-        self.ltp = 0
-        self.quantity = quantity or [] # array of quantities for each step exit
-        self.filled_steps = set()  # TODO: maybe not the best way, the idea is to track which steps have been filled
-        self.total_quantity = sum(self.quantity) if self.quantity else 0  # total quantity, sum of quantity
-        self.remaining_quantity = self.total_quantity  # quantity remaining to be filled
-        self.filled_quantity = 0
-        self.current_quantity = self.total_quantity  # quantity filled so far
+        self.const_name = name
+        self.const_instrument = instrument
+        self.const_side = side.upper()  # 'BUY' or 'SELL'
 
-        # Exit management configuration (merged from ExitManager)
-        self.reterival_exit = 0.1  # Default retrieval exit percentage
+        # information from config and is in steps
+        self.current_step_idx = 0 # this index determines, step exit, step quantity, in future step trigger as well
+        self.step = step  # array of step exit values, in percentage
+        self.current_step = self.step[0]
+        self.step_quantity = quantity # array of step exit, these are constant values, not percentage
         
-        self.market_close = "13:37"   # Market close time
+        # types of stops
+        # profit stop
+        self.trigger = trail[0]   # trigger is a single percentage value, which triggers from min || max fall
+        # this is entry stop, in case the signal is not promising enough
+        self.zero_stop = 0  # to set as the entry price based on side, after 1 minute of entry
+        # this is loss stop, in case of direction switch, although at zero_stop should change the side of order so this should not be triggered, if this is triggered there is gap in system
+        self.hard_stop = 0  # this is the absolute hard stop, this will be set some percentage away from entry price based on side
+        
+        # this works as the entry candle: gives the entry price, and then updated with every candle, for monitoring purpose
+        # this step will update by confimation from the executor for the market price on which entry actually happened
+        self.current_candle: CandleGenerated = candle
+        
+        self.ltp = 0  # most important guy in the team
+        
+        # derived information
+        self.total_quantity = sum(self.step_quantity)
+        self.filled_quantity = 0
+        self.remaining_quantity = self.total_quantity # this is derived from total - filled
+        
+        # Initialize exit manager as a library
+        self.exit_manager = ExitManager(f"ExitManager-{name}")
 
-        self.logger.debug(f"Creating OrderObject: {name}, Instrument: {instrument}, Side: {side}, Step: {self.step}, Trail: {self.trail}, Quantity: {self.quantity}")
+        
+        self.logger.debug(f"Creating OrderObject: {name}, Instrument: {instrument}, Side: {side}, Step: {self.step}, Trail: {self.trigger}, Quantity: {self.step_quantity}")
 
-        # Entry & timestamps - Handle both dict and CandleGenerated objects
-        self.entry_price = self._extract_close_price(candle)
-        if self.entry_price == 0:
-            self.logger.warning(f"Entry price is 0 for order {name}, please check the candle data.")
-        self.entry_time = datetime.now()
-        self.last_update_time = self.entry_time
-        self._timestamp = self.entry_time
+        # Entry & timestamps
+        # entry price can be zero, this is normal
+        self.const_entry_price = candle.close
+        
+        self.const_entry_time = candle.timestamp # this will help in starting the zero_stop timer
+        self.last_update_time = self.const_entry_time
+        self._timestamp = self.const_entry_time
 
         # Price tracking
-        self.min_price = self.entry_price if self.entry_price > 0 else 0
-        self.max_price = self.entry_price if self.entry_price > 0 else 0
-        if(self.min_price == 0 or self.max_price == 0):
-            self.logger.warning(f"Min/Max price initialized to 0 for order {name}, please check the entry price.")
-
-        # Performance tracking (NEW)
-        self.max_move_percentage = 0.0  # highest favorable movement %
-        self.min_move_percentage = 0.0  # worst adverse movement %
-        self.retreat = 0.0  # %, pullback from max
-        self.current_profit_percentage = 0.0  # current PnL %
-        self.current_profit = 0.0 # actual profit, can be negative as well
-        self.logger.debug(f"OrderObject {name} initialized with max_move_percentage: {self.max_move_percentage}, min_move_percentage: {self.min_move_percentage}, retreat: {self.retreat}, current_profit_percentage: {self.current_profit_percentage}, current_profit: {self.current_profit}")
-
-    def set_exit_config(self, reterival_exit: float = 0.1, market_close: str = None):
-        """Set exit management configuration."""
-        self.reterival_exit = reterival_exit
-        self.market_close = market_close  # Keep as string, don't convert to time object
-
-    def _extract_close_price(self, candle):
-        """Extract close price from either dict or CandleGenerated object."""
-        if not candle:
-            return 0
+        self.min_price = self.const_entry_price
+        self.max_price = self.const_entry_price
         
-        try:
-            # Handle CandleGenerated event object
-            if hasattr(candle, 'close'):
-                return float(candle.close)
-            # Handle dictionary format
-            elif isinstance(candle, dict) and 'close' in candle:
-                return float(candle['close'])
-            else:
-                self.logger.warning(f"Unrecognized candle format: {type(candle)}")
-                return 0
-        except (ValueError, TypeError) as e:
-            self.logger.error(f"Error extracting close price from candle: {e}")
-            return 0
+        # Performance tracking - now calculated via exit manager
+        self.max_move_percentage = 0.0
+        self.min_move_percentage = 0.0
+        self.retreat = 0.0
+        self.current_profit_percentage = 0.0
+        self.current_profit = 0.0
 
-    # ----------------- setters -----------------
+
     def set_ltp(self, ltp, timestamp=None) -> Optional[Dict[str, Any]]:
-        """
-        Set LTP and return exit information if exit conditions are met.
-        
-        Returns:
-            Dict with exit information if exit triggered, None otherwise
-        """
+        """Set LTP and return exit information if exit conditions are met."""
         previous_step_idx = self.current_step_idx
         
+        # Update order state
         self.ltp = ltp
         self._update_min_max_price(ltp)
-        self._update_pct_stats()
+        self._update_performance_metrics()
+        # exit manager to be called here to check, if there is a step exit condition met
+        # if true, it will return a condition, will make a signal out of it,
+        # then the update step will be called to update the step and trigger accordingly
         self.update_step()
         self.last_update_time = timestamp or datetime.now()
         self._timestamp = self.last_update_time
-        
-        if self.entry_price == 0:
-            self.entry_price = ltp
-            self.entry_time = self.last_update_time
 
-        # Check for exit conditions after LTP update
-        exit_info = self._check_exit_conditions(timestamp)
+        # there is no order state, the real orderObject is checked in the exit manager
         
-        # If step changed, log it
+        # Check for exit conditions using exit manager
+        exit_info = self.exit_manager.check(self)
+
+        # Check for step-based exits if step changed
         if self.current_step_idx != previous_step_idx:
-            self.logger.info(f"Step changed for {self.name}: {previous_step_idx} → {self.current_step_idx}")
+            self.logger.info(f"Step changed for {self.const_name}: {previous_step_idx} → {self.current_step_idx}")
             
-            # Check if step change triggers exit
             if not exit_info:
-                exit_info = self._check_step_exit(previous_step_idx)
+                exit_info = self.exit_manager.check_step_exit(order_state, previous_step_idx)
         
         return exit_info
 
-    def _check_exit_conditions(self, timestamp: datetime = None) -> Optional[Dict[str, Any]]:
-        """Check all exit conditions and return exit info if any condition is met."""
-        current_timestamp = timestamp or datetime.now()
-        
-        # Market close exit check - skip this check for now to avoid errors
-        # if self.market_close and current_timestamp.time() >= self.market_close:
-        #     return {
-        #         'symbol': self.name,
-        #         'exit_price': self.ltp,
-        #         'exit_reason': 'MARKET_CLOSE',
-        #         'quantity': self.current_quantity,
-        #         'exit_type': 'TIME'
-        #     }
-        
-        # Trail exit check (retreat exceeds trail threshold)
-        if self.retreat >= self.current_trail:
-            return {
-                'symbol': self.name,
-                'exit_price': self.ltp,
-                'exit_reason': f'TRAIL_EXIT_{self.current_trail}',
-                'quantity': self.current_quantity,
-                'exit_type': 'TRAIL'
-            }
-        
-        # Retrieval exit (stop loss)
-        if self.current_profit_percentage <= -self.reterival_exit:
-            return {
-                'symbol': self.name,
-                'exit_price': self.ltp,
-                'exit_reason': 'RETRIEVAL_EXIT',
-                'quantity': self.current_quantity,
-                'exit_type': 'LOSS'
-            }
-        
-        return None
+    def _get_order_state(self) -> Dict[str, Any]:
+        """Get current order state for exit manager."""
+        return {
+            'name': self.const_name,
+            'side': self.const_side,
+            'ltp': self.ltp,
+            'entry_price': self.const_entry_price,
+            'min_price': self.min_price,
+            'max_price': self.max_price,
+            'current_step_idx': self.current_step_idx,
+            'current_trigger': self.current_trigger,
+            'quantity': self.step_quantity,
+            'step': self.step,
+            'current_profit_percentage': self.current_profit_percentage,
+            'retreat': self.retreat
+        }
 
-    def _check_step_exit(self, previous_step_idx: int) -> Optional[Dict[str, Any]]:
-        """Check if step change triggers partial exit."""
-        if previous_step_idx < len(self.quantity) and self.current_step_idx > previous_step_idx:
-            # Exit quantity for the completed step
-            exit_quantity = self.quantity[previous_step_idx]
-            
-            return {
-                'symbol': self.name,
-                'exit_price': self.ltp,
-                'exit_reason': f'STEP_EXIT_{self.step[previous_step_idx]}',
-                'quantity': exit_quantity,
-                'exit_type': 'PROFIT',
-                'step_idx': previous_step_idx
-            }
+    def _update_performance_metrics(self):
+        """Update performance metrics using exit manager calculations."""
+        order_state = self._get_order_state()
+        metrics = self.exit_manager.calculate_performance_metrics(order_state)
         
-        return None
+        # Update instance variables with calculated metrics
+        self.current_profit = metrics['current_profit']
+        self.current_profit_percentage = metrics['current_profit_percentage']
+        self.max_move_percentage = max(self.max_move_percentage, metrics['max_move_percentage'])
+        self.min_move_percentage = min(self.min_move_percentage, metrics['min_move_percentage'])
+        self.retreat = metrics['retreat']
 
-    ## proof: just set the candle
     def set_current_candle(self, candle):
         self.current_candle: CandleGenerated = candle
-        
 
-    ## proof
     def _update_min_max_price(self, price):
-        # self.logger.debug(f"Updating min/max price for {self.name}: current price {price}, min price {self.min_price}, max price {self.max_price}") 
         if self.min_price == 0 or price < self.min_price:
             self.min_price = price
         if self.max_price == 0 or price > self.max_price:
             self.max_price = price
 
-    def _update_pct_stats(self):
-        # self.logger.debug(f"Updating pct stats for {self.name}")
-        if not self.entry_price:
+    def update_step(self):
+        if not self.step or not self.const_entry_price:
+            self.logger.warning(f"Cannot update step for {self.const_name}: step list or entry price is not set.")
             return
+        price_move_pct = ((self.ltp - self.const_entry_price) / self.const_entry_price) if self.const_side == 'BUY' else ((self.const_entry_price - self.ltp) / self.const_entry_price)
+        for i, s in enumerate(self.step):
+            if price_move_pct >= s and i > self.current_step_idx:
+                self.logger.debug(f"Updating step for {self.const_name}: current step idx {self.current_step_idx}, current step {self.current_step}, current trail {self.current_trigger}")
+                self.current_step_idx = i
+                self.current_step = s
 
-        # Current % move
-        if self.side == "BUY":
-            self.current_profit = self.ltp - self.entry_price
-            self.current_profit_percentage = ((self.current_profit) / self.entry_price) * 100
-            self.max_move_percentage = max(self.max_move_percentage, ((self.max_price - self.entry_price) / self.entry_price) * 100)
-            self.min_move_percentage = min(self.min_move_percentage, ((self.min_price - self.entry_price) / self.entry_price) * 100)
-            self.retreat = self.max_move_percentage - self.current_profit_percentage
-        else:  # SELL
-            self.current_profit = self.entry_price - self.ltp
-            self.current_profit_percentage = ((self.current_profit) / self.entry_price) * 100
-            self.max_move_percentage = max(self.max_move_percentage, ((self.entry_price - self.min_price) / self.entry_price) * 100)
-            self.min_move_percentage = min(self.min_move_percentage, ((self.entry_price - self.max_price) / self.entry_price) * 100)
-            self.retreat = self.max_move_percentage - self.current_profit_percentage
-
-    # ----------------- getters -----------------
+    # Getters - keep existing interface
     def get_current_step(self):
         return self.step[self.current_step_idx] if self.step else 0
 
-    def get_current_trail(self):
-        return self.trail
+    def get_current_trigger(self):
+        return self.trigger
+    
+    def get_current_quantity(self):
+        # returns the current step quantity to be exited
+        return self.step_quantity[self.current_step_idx]
+    
+    def get_current_step_idx(self):
+        return self.current_step_idx
 
-    def update_step(self):
-        if not self.step or not self.entry_price:
-            self.logger.warning(f"Cannot update step for {self.name}: step list or entry price is not set.")
-            return
-        price_move_pct = ((self.ltp - self.entry_price) / self.entry_price) if self.side == 'BUY' else ((self.entry_price - self.ltp) / self.entry_price)
-        for i, s in enumerate(self.step):
-            if price_move_pct >= s and i > self.current_step_idx:
-                self.logger.debug(f"Updating step for {self.name}: current step idx {self.current_step_idx}, current step {self.current_step}, current trail {self.current_trail}")
-                self.current_step_idx = i
-                self.current_step = s
-                
-
-    # convenience accessors
-    def get_entry_price(self): return self.entry_price
-    def get_entry_time(self): return self.entry_time
+    def get_current_step_trigger(self):
+        return self.step[self.current_step_idx]
+    
+    
+    # ...existing code for all other getters...
+    def get_entry_price(self): return self.const_entry_price
+    def get_entry_time(self): return self.const_entry_time
     def get_min_price(self): return self.min_price
     def set_min_price(self, price): self.min_price = price
     def get_max_price(self): return self.max_price
     def set_max_price(self, price): self.max_price = price
-    def get_side(self): return self.side
-    def get_name(self): return self.name
-    def get_instrument(self): return self.instrument
+    def get_side(self): return self.const_side
+    def get_name(self): return self.const_name
+    def get_instrument(self): return self.const_instrument
     def get_ltp(self): return self.ltp
-
-    # NEW: insight getters
     def get_max_move_percentage(self): return self.max_move_percentage
     def get_min_move_percentage(self): return self.min_move_percentage
     def get_current_profit_percentage(self): return self.current_profit_percentage
     def get_current_profit(self): return self.current_profit
     def get_retreat(self): return self.retreat
-    def get_current_quantity(self): return self.current_quantity
     def get_total_quantity(self): return self.total_quantity
-    def get_remaining_quantity(self): return self.total_quantity - self.current_quantity
-    def get_ltp(self): return self.ltp
-
-    # NEW: insight getters
-    def get_max_move_percentage(self): return self.max_move_percentage
-    def get_min_move_percentage(self): return self.min_move_percentage
-    def get_current_profit_percentage(self): return self.current_profit_percentage
-    def get_current_profit(self): return self.current_profit
-    def get_retreat(self): return self.retreat
-    def get_current_quantity(self): return self.current_quantity
-    def get_total_quantity(self): return self.total_quantity
-    def get_remaining_quantity(self): return self.total_quantity - self.current_quantity
+    def get_remaining_quantity(self): return self.total_quantity - self.filled_quantity

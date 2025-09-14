@@ -10,9 +10,9 @@ This system follows strict architectural patterns. Violating these patterns will
 2. **ALWAYS** use ThreadManager for all concurrent operations
 3. **NEVER** create threads directly - use thread pool submission
 4. **ALWAYS** use the EventBus for inter-component communication 
-5. **NEVER** use direct callbacks or handler registration between components
+5. **NEVER** modify OrderObject exit logic without understanding ExitManager integration
 6. **ALWAYS** inherit from Publisher/Subscriber mixins for event communication
-7. **NEVER** import from the wrong locations - follow the directory structure
+7. **NEVER** create separate ExitManager instances - it's integrated into OrderObject
 8. **ALWAYS** check existing tests before implementing new features
 9. **NEVER** modify core architecture without understanding the entire flow
 
@@ -20,24 +20,22 @@ This system follows strict architectural patterns. Violating these patterns will
 
 ## Project Overview
 
-This is a **production-grade algorithmic trading system** implementing VWAP (Volume Weighted Average Price) strategies for Indian markets (NSE F&O) using multiple broker APIs (Zerodha, Binance, Upstox). The system is built on a **thread-managed event-driven architecture** with strict separation of concerns and factory patterns for extensibility.
+This is a **production-grade algorithmic trading system** implementing VWAP (Volume Weighted Average Price) strategies for cryptocurrency markets using Binance WebSocket streaming. The system features **integrated order management with real-time exit detection** built on a **thread-managed event-driven architecture**.
 
 ### Core Philosophy
 - **Thread-Managed**: Centralized thread pool management for all concurrent operations
 - **Event-Driven**: All communication via EventBus singleton
-- **Decoupled Components**: No direct dependencies between modules
+- **Integrated Exit Logic**: OrderObject contains ExitManager as library for real-time exit detection
+- **Real-time Processing**: Exit conditions checked on every LTP update
 - **Publisher-Subscriber Pattern**: Components publish/subscribe to typed events
 - **Factory Pattern**: Dynamic component creation based on configuration
 - **Thread-Safe**: Concurrent access handled properly through ThreadManager
-- **Testable**: Each component tested in isolation with comprehensive thread safety tests
 
 ---
 
-## 🏗️ SYSTEM ARCHITECTURE
+## 🏗️ CURRENT SYSTEM ARCHITECTURE
 
 ### Thread Management Foundation
-
-The **ThreadManager** is the concurrency backbone of the system. ALL threading operations go through centralized thread pools.
 
 ```
 ┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
@@ -50,68 +48,71 @@ The **ThreadManager** is the concurrency backbone of the system. ALL threading o
 │   EventBus      │    │  Async Loops    │
 │   Pool (2)      │    │  (Streamer/Bus) │
 └─────────────────┘    └─────────────────┘
-         │                       │
-         ▼                       ▼
-┌─────────────────┐    ┌─────────────────┐
-│   Strategy      │    │   Executor      │
-│   Pool (2)      │    │   Pool (2)      │
-└─────────────────┘    └─────────────────┘
 ```
 
-### Thread Pool Architecture
+### Current Order Management Architecture
 
 ```
-ThreadManager (Singleton)
-├── EVENT_BUS Pool (2 workers) + Async Loop
-│   └── Handles event publishing/routing
-├── STREAMER Pool (4 workers) + Async Loop  
-│   └── Market data collection and processing
-├── STRATEGY Pool (2 workers)
-│   └── Trading signal generation
-├── EXECUTOR Pool (2 workers)
-│   └── Order placement and management
-└── SYSTEM Pool (2 workers)
-    └── Health checks, logging, monitoring
+QuoteEvent (BinanceStreamer)
+        │
+        ▼
+OrderManager.update_ltp()
+        │
+        ▼
+OrderObject.set_ltp() ──┐
+        │               │
+        ▼               ▼
+ExitManager Library     Performance Metrics Update
+(Integrated)           (Real-time calculation)
+        │               │
+        ▼               ▼
+Exit Condition Check ──┘
+        │
+        ▼
+Return Exit Info (if triggered)
+        │
+        ▼
+OrderManager._handle_exit_signal_from_dict()
+        │
+        ▼
+Execute Exit Order
 ```
 
-### Event Bus Integration with Thread Pools
+### Real-time Exit Detection Flow
 
 ```
-BaseStreamer ──┐
-              ├──► ThreadManager.submit_task(STREAMER, quote_processing)
-              │       │
-              │       ▼
-              │   ┌─────────────────┐
-              └──►│   EventBus      │──┐
-                  │   (EVENT_BUS    │  │
-                  │    Thread Pool) │  │
-                  └─────────────────┘  │
-                           │           │
-                           ▼           ▼
-                  VwapStrategy     OrderManager
-                  (STRATEGY Pool)  (EXECUTOR Pool)
+LTP Update → OrderObject.set_ltp()
+                   │
+                   ├─→ ExitManager.check_exit_conditions()
+                   │   ├─→ Trail Exit Check (retreat >= trail)
+                   │   ├─→ Stop Loss Check (profit <= -retrieval_exit)
+                   │   └─→ Market Close Check (disabled)
+                   │
+                   ├─→ ExitManager.check_step_exit()
+                   │   └─→ Step Change Exit (partial quantities)
+                   │
+                   └─→ ExitManager.calculate_performance_metrics()
+                       ├─→ Current Profit/Loss
+                       ├─→ Maximum Movement %
+                       ├─→ Retreat Calculation
+                       └─→ Min/Max Price Tracking
 ```
 
 ---
 
-## 📁 DIRECTORY STRUCTURE (WITH THREAD MANAGEMENT)
+## 📁 CURRENT DIRECTORY STRUCTURE
 
 ```
 src/
 ├── main.py                          # 🎯 ENTRY POINT - ThreadManager initialization
-├── config_manager.py                # Hot-reload trading config
-├── system_config_manager.py         # System-wide configuration
+├── config_manager.py                # Trading configuration (hot-reload)
+├── system_config_manager.py         # System configuration
 ├── logger_factory.py               # Centralized logging with console output
 │
 ├── core/
 │   ├── thread_manager.py            # 🚨 THREAD POOL MANAGEMENT (Singleton)
-│   │                               # - Centralized thread pool creation
-│   │                               # - Async loop management
-│   │                               # - Task submission and monitoring
-│   │                               # - Graceful shutdown handling
 │   │
 │   ├── event_bus/                   # 🚨 CORE ARCHITECTURE
-│   │   ├── __init__.py             # Event exports
 │   │   ├── event_bus.py            # EventBus singleton (Uses EVENT_BUS pool)
 │   │   ├── events.py               # All event definitions
 │   │   └── mixins.py               # Publisher/Subscriber mixins
@@ -119,287 +120,286 @@ src/
 │   ├── executors/                   # 🎯 EXECUTION LAYER (Uses EXECUTOR pool)
 │   │   ├── base_executor.py        # Abstract base (Thread-safe)
 │   │   ├── executor_factory.py     # Factory for creating executors
-│   │   ├── mock_executor.py        # Paper trading executor
-│   │   └── zerodha_executor.py     # Zerodha Kite executor
+│   │   └── mock_executor.py        # Paper trading executor
 │   │
 │   ├── streamer/                    # 🎯 STREAMING LAYER (Uses STREAMER pool)
 │   │   ├── base_streamer.py        # Abstract base with ThreadManager integration
 │   │   ├── streamer_factory.py     # Factory for creating streamers
 │   │   ├── offline_streamer.py     # Demo data generator
-│   │   └── quote_normalizer.py     # Standardizes quote formats
+│   │   └── binance_streamer.py     # 🔥 LIVE BINANCE WEBSOCKET STREAMING
 │   │
-│   ├── candle_maker.py             # 🎯 OHLCV + VWAP (Uses EVENT_BUS pool)
-│   ├── order_manager.py            # Order management (Uses EXECUTOR pool)
-│   └── order_object.py             # Order state encapsulation
+│   ├── exit_manager.py             # 🆕 EXIT MANAGEMENT LIBRARY
+│   │                               # - Used as library by OrderObject
+│   │                               # - Real-time exit condition checking
+│   │                               # - Performance metrics calculation
+│   │                               # - Step-based exit logic
+│   │
+│   ├── order_manager.py            # 🔄 ORDER LIFECYCLE MANAGEMENT
+│   │                               # - Integrated with ExitManager
+│   │                               # - Real-time IPC file writing
+│   │                               # - Thread-safe order handling
+│   │
+│   ├── order_object.py             # 🔄 ORDER STATE + EXIT INTEGRATION
+│   │                               # - Contains ExitManager as library
+│   │                               # - Real-time exit detection on LTP updates
+│   │                               # - Integrated performance tracking
+│   │
+│   └── candle/
+│       └── candle_maker.py         # 🎯 OHLCV + VWAP (Uses EVENT_BUS pool)
 │
 ├── strategies/
-│   ├── vwap_strategy.py            # 🎯 TRADING LOGIC (Uses STRATEGY pool)
-│   └── exit_manager.py             # Exit conditions (Uses STRATEGY pool)
+│   └── vwap_strategy.py            # 🎯 TRADING LOGIC (Uses STRATEGY pool)
 │
-└── market/                          # 🎯 BROKER-SPECIFIC IMPLEMENTATIONS
-    ├── zerodha/
-    │   └── zerodha_streamer.py     # Live Kite streaming (Uses STREAMER pool)
-    └── binance/
-        └── binance_streamer.py     # Crypto streaming (Uses STREAMER pool)
+└── static/
+    └── sample_binance.py           # 📘 REFERENCE WEBSOCKET IMPLEMENTATION
 
-tests/
-├── test_thread_manager.py          # 🧪 Core ThreadManager tests
-├── test_thread_manager_performance.py # Performance under load
-├── test_thread_manager_stress.py   # Stress and edge cases
-├── test_event_bus.py               # EventBus with thread pools
-└── test_integration.py             # End-to-end threading tests
+data/
+└── live_order.json                 # 🔄 REAL-TIME ORDER DATA (IPC)
 
-system_config.json                  # 🔧 SYSTEM + THREAD CONFIGURATION
-trading_config.json                 # 🔧 TRADING CONFIGURATION
-CONFIG_OPTIONS.md                   # 🔧 COMPLETE CONFIGURATION REFERENCE
+trading_config.json                  # 🔧 SYMBOLS, EXIT STEPS, QUANTITIES
+system_config.json                  # 🔧 THREAD POOLS, STREAMER TYPE
 ```
 
 ---
 
-## 🔄 THREAD-MANAGED EVENT FLOW
+## 🔄 CURRENT SYSTEM FLOW
 
-### 1. **Market Data Flow with Thread Pools**
+### 1. **Market Data Flow (Binance WebSocket)**
 ```
-BaseStreamer (STREAMER Pool)
-    │ submit_task(STREAMER, quote_processing)
-    │ submit_task(EVENT_BUS, event_publishing)
+BinanceStreamer (STREAMER Pool)
+    │ WebSocket: wss://stream.binance.com:9443/ws/btcusdt@trade
+    │ Real-time trade data processing
     ▼
 ThreadManager → EventBus (EVENT_BUS Pool)
-    │ routes events through thread pool
+    │ QuoteEvent publishing
     ▼  
 CandleMaker (EVENT_BUS Pool)
-    │ submit_task(EVENT_BUS, candle_generation)
-    │ publishes CandleGenerated
+    │ OHLCV + VWAP calculation
+    │ CandleGenerated event publishing
     ▼
 VwapStrategy (STRATEGY Pool)
-    │ submit_task(STRATEGY, signal_analysis)
+    │ Signal analysis and EntrySignal generation
 ```
 
-### 2. **Trading Signal Flow with Thread Pools**
+### 2. **Order Management Flow (Integrated Exit Logic)**
 ```
 VwapStrategy (STRATEGY Pool)
-    │ submit_task(EVENT_BUS, publish_entry_signal)
-    ▼
-EventBus (EVENT_BUS Pool)
-    │ routes to subscribers through thread pool
+    │ EntrySignal → EventBus
     ▼
 OrderManager (EXECUTOR Pool)
-    │ submit_task(EXECUTOR, order_processing)
-    │ calls ExecutorFactory → BaseExecutor
+    │ Creates OrderObject with ExitManager library
+    │ Sets exit configuration (retrieval_exit, trail, steps)
+    ▼
+OrderObject + ExitManager
+    │ Real-time exit condition monitoring
+    │ Performance metrics calculation
+    │ Step-based exit detection
+```
+
+### 3. **Real-time Exit Detection (On Every LTP Update)**
+```
+BinanceStreamer → QuoteEvent → OrderManager.update_ltp()
+                                      │
+                                      ▼
+                               OrderObject.set_ltp()
+                                      │
+                                      ├─→ ExitManager.check_exit_conditions()
+                                      ├─→ ExitManager.check_step_exit()
+                                      └─→ ExitManager.calculate_performance_metrics()
+                                      │
+                                      ▼
+                               Return Exit Info (if triggered)
+                                      │
+                                      ▼
+                               OrderManager.handle_exit()
+                                      │
+                                      ▼
+                               Execute Exit Order
 ```
 
 ---
 
-## 🚨 CRITICAL IMPLEMENTATION RULES (UPDATED)
+## 🚨 CRITICAL IMPLEMENTATION RULES (CURRENT SYSTEM)
 
-### Rule 1: Thread Pool Usage (MANDATORY)
+### Rule 1: OrderObject Exit Integration (MANDATORY)
 ```python
-# ✅ CORRECT - Use ThreadManager for all threading
-from src.core.thread_manager import ThreadManager, ThreadPoolType
-
-thread_manager = ThreadManager()
-thread_manager.initialize_pools()  # CRITICAL - Must initialize first
-
-# Submit CPU-bound task
-future = thread_manager.submit_task(
-    ThreadPoolType.STRATEGY,
-    self.calculate_signals,
-    market_data
-)
-
-# Submit async I/O task
-async_future = thread_manager.submit_async_task(
-    ThreadPoolType.STREAMER,
-    self.fetch_market_data_async()
-)
-
-# ❌ WRONG - Direct thread creation
-import threading
-thread = threading.Thread(target=some_function)  # DON'T DO THIS
-thread.start()
-```
-
-### Rule 2: Logger Usage with Console Output
-```python
-# ✅ CORRECT - Use logger with console output for important components
-from src.logger_factory import get_logger
-
-# For main components (console + file logging)
-logger = get_logger("MainComponent", console_output=True)
-
-# For utility components (file logging only)
-logger = get_logger("UtilityComponent", console_output=False)
-
-# ❌ WRONG - Standard print statements
-print("Something happened")  # Use logger instead
-```
-
-### Rule 3: Factory Pattern for Component Creation
-```python
-# ✅ CORRECT - Use factories for component creation
-from src.core.streamer.streamer_factory import StreamerFactory
-from src.core.executors.executor_factory import ExecutorFactory
-
-streamer = StreamerFactory.create_streamer(
-    streamer_type='offline',
-    symbols=['NIFTY'],
-    config={'base_price': 18500.0}
-)
-
-executor = ExecutorFactory.create_executor(
-    broker='mock',
-    config={'slippage_factor': 0.01}
-)
-
-# ❌ WRONG - Direct instantiation
-from src.core.streamer.offline_streamer import OfflineStreamer
-streamer = OfflineStreamer()  # Bypasses factory pattern
-```
-
-### Rule 4: Event Publishing Through Thread Pools
-```python
-# ✅ CORRECT - Publish events through EVENT_BUS pool
-class MarketDataProcessor(Publisher):
-    def __init__(self):
-        super().__init__()
-        self.thread_manager = ThreadManager()
-        
-    def publish_quote(self, quote_data):
-        def _publish_task():
-            event = QuoteEvent(...)
-            self.publish_event(event)
-        
-        self.thread_manager.submit_task(ThreadPoolType.EVENT_BUS, _publish_task)
-
-# ❌ WRONG - Direct event publishing without thread pool
-class BadProcessor(Publisher):
-    def publish_quote(self, quote_data):
-        event = QuoteEvent(...)
-        self.publish_event(event)  # Blocks calling thread
-```
-
----
-
-## 🧪 TESTING ARCHITECTURE (COMPREHENSIVE)
-
-### Test File Structure
-```
-tests/
-├── test_thread_manager.py           # Core ThreadManager functionality
-│   ├── Singleton pattern tests
-│   ├── Thread pool initialization
-│   ├── Task submission and completion
-│   ├── Error handling and statistics
-│   └── Graceful shutdown tests
-│
-├── test_thread_manager_performance.py # Performance under load
-│   ├── High-volume task submission
-│   ├── Concurrent pool usage
-│   ├── Memory usage monitoring
-│   └── Latency distribution analysis
-│
-├── test_thread_manager_stress.py    # Stress and edge cases
-│   ├── Exception handling under load
-│   ├── Thread pool saturation
-│   ├── Mixed chaotic workloads
-│   └── Shutdown with pending tasks
-│
-└── test_event_bus.py                # EventBus integration tests
-    ├── Event publishing and subscription
-    ├── Thread-safe event handling
-    ├── Publisher/Subscriber mixins
-    └── Trading workflow simulation
-```
-
-### Thread-Safe Testing Pattern
-```python
-# Standard test pattern for thread-safe components
-class TestThreadSafeComponent(unittest.TestCase):
-    def setUp(self):
-        ThreadManager._instance = None  # Reset singleton
-        EventBus._instance = None       # Reset EventBus
-        self.thread_manager = ThreadManager()
-        self.thread_manager.initialize_pools()
+# ✅ CORRECT - OrderObject with integrated ExitManager
+class OrderObject:
+    def __init__(self, name, instrument, step, trail, side, quantity, candle=None):
+        # Initialize exit manager as a library
+        self.exit_manager = ExitManager(f"ExitManager-{name}")
+        # ...other initialization...
     
-    def tearDown(self):
-        self.thread_manager.shutdown(wait=True, timeout=5.0)
-        ThreadManager._instance = None
-        EventBus._instance = None
-    
-    def test_concurrent_operations(self):
-        # Test component under concurrent access
-        futures = []
-        for i in range(10):
-            future = self.thread_manager.submit_task(
-                ThreadPoolType.STRATEGY,
-                component.process_data,
-                test_data[i]
-            )
-            futures.append(future)
+    def set_ltp(self, ltp, timestamp=None) -> Optional[Dict[str, Any]]:
+        # Update order state
+        self.ltp = ltp
+        self._update_min_max_price(ltp)
+        self._update_performance_metrics()  # Uses ExitManager
         
-        # Verify all tasks complete successfully
-        results = [f.result(timeout=10.0) for f in futures]
-        self.assertEqual(len(results), 10)
+        # Get current order state for exit manager
+        order_state = self._get_order_state()
+        
+        # Check for exit conditions using exit manager
+        exit_info = self.exit_manager.check_exit_conditions(order_state, timestamp)
+        
+        return exit_info  # Returns exit info if triggered
+
+# ❌ WRONG - Creating separate ExitManager instances
+exit_manager = ExitManager()  # Don't create standalone instances
+```
+
+### Rule 2: Real-time IPC File Writing
+```python
+# ✅ CORRECT - IPC file writing in OrderManager
+def _write_live_order_data(self):
+    # Ensure data directory exists
+    os.makedirs("data", exist_ok=True)
+    
+    # Collect live order data
+    live_orders = []
+    for symbol, order in self._orders.items():
+        order_data = {
+            "symbol": symbol,
+            "current_ltp": order.get_ltp(),
+            "current_profit_percentage": order.get_current_profit_percentage(),
+            "retreat": order.get_retreat(),
+            # ...other real-time data...
+        }
+        live_orders.append(order_data)
+    
+    # Write to IPC file for dashboard
+    with open("data/live_order.json", 'w') as f:
+        json.dump(ipc_data, f, indent=2)
+
+# ❌ WRONG - Not updating IPC files
+def update_ltp(self, event):
+    order.set_ltp(event.ltp, event.timestamp)
+    # Missing: self._write_live_order_data()
+```
+
+### Rule 3: Current Configuration Pattern
+```python
+# ✅ CORRECT - Current trading configuration structure
+{
+  "symbols": ["btcusdt"],                    # Binance symbol format
+  "name_symbol": "btcusdt",                  # Display name
+  "exit_steps": [
+    [0.002, 0.3], [0.004, 0.3], [0.005, 0.3]  # [profit%, trail%]
+  ],
+  "quantities": [100, 75, 50, 25, 10],       # Step quantities
+  "trails": [0.01, 0.02, 0.03],             # Trail values
+  "reterival_exit": 0.1                      # Stop loss %
+}
+
+# ✅ CORRECT - Current system configuration
+{
+  "streamer": {"type": "binance", "async_enabled": true},
+  "executor": {"type": "mock"},
+  "threading": {
+    "streamer_workers": 4,
+    "event_bus_workers": 2
+  }
+}
+```
+
+### Rule 4: ExitManager Library Usage
+```python
+# ✅ CORRECT - ExitManager as library in OrderObject
+def _update_performance_metrics(self):
+    """Update performance metrics using exit manager calculations."""
+    order_state = self._get_order_state()
+    metrics = self.exit_manager.calculate_performance_metrics(order_state)
+    
+    # Update instance variables with calculated metrics
+    self.current_profit = metrics['current_profit']
+    self.current_profit_percentage = metrics['current_profit_percentage']
+    self.retreat = metrics['retreat']
+
+# ❌ WRONG - Manual performance calculation
+def _update_performance_metrics(self):
+    # Don't calculate manually, use ExitManager library
+    self.current_profit = self.ltp - self.entry_price  # Use library instead
 ```
 
 ---
 
-## 🎯 RUNNING TESTS (COMMAND REFERENCE)
+## 🧪 CURRENT TESTING PRIORITIES
 
-### Core Thread Manager Tests
-```bash
-# Basic functionality tests
-python3 -m unittest tests.test_thread_manager -v
+### Integration Tests for New Architecture
+```python
+# Test OrderObject with integrated ExitManager
+def test_order_object_exit_integration(self):
+    order = OrderObject(
+        name="BTCUSDT",
+        instrument="BTCUSDT", 
+        step=[0.002, 0.004],
+        trail=[0.01],
+        side="BUY",
+        quantity=[100, 50]
+    )
+    
+    # Test exit detection on LTP update
+    exit_info = order.set_ltp(18600.0)  # Should trigger exit
+    self.assertIsNotNone(exit_info)
+    self.assertEqual(exit_info['exit_type'], 'TRAIL')
 
-# Performance tests under load
-python3 -m unittest tests.test_thread_manager_performance -v
-
-# Stress tests and edge cases  
-python3 -m unittest tests.test_thread_manager_stress -v
-
-# Specific test methods
-python3 -m unittest tests.test_thread_manager.TestThreadManager.test_singleton_pattern -v
-python3 -m unittest tests.test_thread_manager.TestThreadManager.test_concurrent_task_submission -v
+# Test real-time IPC file writing
+def test_live_order_ipc_writing(self):
+    order_manager = OrderManager()
+    # Create test order
+    # Update LTP
+    # Verify data/live_order.json is updated
+    self.assertTrue(os.path.exists("data/live_order.json"))
 ```
 
-### Event Bus Tests
+### Current System Testing Commands
 ```bash
-# Event bus functionality
-python3 -m unittest tests.test_event_bus -v
+# Test integrated order management
+python3 -m unittest tests.test_order_object -v
 
-# Specific event bus tests
-python3 -m unittest tests.test_event_bus.TestEventBus.test_thread_safety -v
-python3 -m unittest tests.test_event_bus.TestEventIntegration.test_trading_workflow -v
-```
+# Test real-time exit detection
+python3 -m unittest tests.test_exit_manager -v
 
-### Performance & Stress Testing
-```bash
-# High-volume task processing
-python3 -m unittest tests.test_thread_manager_performance.TestThreadManagerPerformance.test_high_volume_task_submission -v
+# Test Binance streaming
+python3 -m unittest tests.test_binance_streamer -v
 
-# Memory usage monitoring
-python3 -m unittest tests.test_thread_manager_performance.TestThreadManagerPerformance.test_memory_usage_under_load -v
-
-# Chaos testing
-python3 -m unittest tests.test_thread_manager_stress.TestThreadManagerStress.test_mixed_workload_chaos -v
-```
-
-### Run All Tests
-```bash
-# Complete test suite
-python3 -m unittest discover -s tests -v
-
-# With coverage reporting
-python3 -m coverage run -m unittest discover -s tests
-python3 -m coverage report -m
+# Test complete trading flow
+python3 -m unittest tests.test_trading_integration -v
 ```
 
 ---
 
-## 🔧 CONFIGURATION SYSTEM (COMPLETE REFERENCE)
+## 📋 CURRENT SYSTEM STATUS
 
-### Key Configuration Files
-- **`system_config.json`**: Thread pools, component types, logging, performance
+### ✅ Operational Components
+- **BinanceStreamer**: Live WebSocket streaming for BTCUSDT
+- **OrderObject with ExitManager**: Integrated exit logic and performance tracking
+- **Real-time IPC**: Live order data written to `data/live_order.json`
+- **Thread-safe Architecture**: All operations via ThreadManager
+- **Event-driven Flow**: Complete market data → signal → order → exit flow
+
+### 🔄 Current Data Flow
+- **Market Data**: Binance WebSocket → QuoteEvent → CandleMaker → CandleGenerated
+- **Strategy**: VwapStrategy → EntrySignal → OrderManager
+- **Order Management**: OrderObject + ExitManager → Real-time exit detection
+- **IPC**: Live order data → `data/live_order.json` → Dashboard integration
+
+### 🎯 Key Features Working
+- **Real-time Exit Detection**: Checks on every LTP update
+- **Step-based Exits**: Partial exits when profit targets hit
+- **Performance Tracking**: Real-time profit, retreat, maximum movement
+- **Live Monitoring**: Dashboard-ready JSON data in real-time
+- **Thread Safety**: Concurrent processing via ThreadManager
+
+### ⚠️ Current System Notes
+- **Market Close Exits**: Disabled due to time comparison issues
+- **Crypto Focus**: Currently optimized for Binance cryptocurrency trading
+- **Mock Execution**: Using paper trading executor for safety
+- **Real-time Updates**: IPC file updated on every LTP change
+
+---
+
+**🚨 REMEMBER: The current system has integrated OrderObject + ExitManager for real-time exit detection. Every LTP update triggers exit condition checking and performance metric calculation. Use ExitManager as a library within OrderObject, never as a standalone component. Always update IPC files for dashboard integration.**
 - **`trading_config.json`**: Symbols, strategies, risk management, API credentials  
 - **`CONFIG_OPTIONS.md`**: Complete reference of all configuration options
 
