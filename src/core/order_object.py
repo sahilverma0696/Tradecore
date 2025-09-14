@@ -1,12 +1,14 @@
 from datetime import datetime
-from src.core.event_bus.events import CandleGenerated
+from src.core.event_bus.events import CandleGenerated, ExitSignal
+from src.core.event_bus.mixins import Publisher
 from src.logger_factory import get_logger
 from src.core.exit_manager import ExitManager
 from typing import Optional, Dict, Any
 
 
-class OrderObject:
+class OrderObject(Publisher):
     def __init__(self, name, instrument, step, trail, side, quantity, candle: CandleGenerated):
+        # TODO: implement market close logic: 1337
         # no default values, the system expects to be having values from config
         # else it fails
         # basic information
@@ -14,6 +16,7 @@ class OrderObject:
         self.const_name = name
         self.const_instrument = instrument
         self.const_side = side.upper()  # 'BUY' or 'SELL'
+        
 
         # information from config and is in steps
         self.current_step_idx = 0 # this index determines, step exit, step quantity, in future step trigger as well
@@ -72,6 +75,22 @@ class OrderObject:
         
         # Update order state
         self.ltp = ltp
+        # Check for exit conditions using exit manager
+        exit_info = self.exit_manager.check(self)
+        if exit_info:
+            # create exit signal and send it to executor
+            # Send exit signal with opposite side
+            opposite_side = "SELL" if self.const_side == "BUY" else "BUY"
+            exitEvent = ExitSignal(
+                symbol=self.const_name,
+                direction=opposite_side,
+                price=ltp,
+                quantity=exit_info['quantity'],
+                exit_type=exit_info['exit_type'],
+                reason=exit_info['reason']
+            )
+            self.publish(exitEvent)
+
         self._update_min_max_price(ltp)
         self._update_performance_metrics()
         # exit manager to be called here to check, if there is a step exit condition met
@@ -83,8 +102,7 @@ class OrderObject:
 
         # there is no order state, the real orderObject is checked in the exit manager
         
-        # Check for exit conditions using exit manager
-        exit_info = self.exit_manager.check(self)
+        
 
         # Check for step-based exits if step changed
         if self.current_step_idx != previous_step_idx:
