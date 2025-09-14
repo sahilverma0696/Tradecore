@@ -1,4 +1,4 @@
-from typing import Dict
+from typing import Dict, Any
 from datetime import datetime
 import json
 import os
@@ -8,6 +8,7 @@ from src.logger_factory import get_logger
 from src.core.order_object import OrderObject
 from src.core.order_logger import OrderLogger
 from src.config_manager import ConfigManager
+from src.core.thread_manager import ThreadManager, ThreadPoolType
 
 class OrderManager(Subscriber, Publisher):
     """Manages order lifecycle and execution."""
@@ -18,7 +19,9 @@ class OrderManager(Subscriber, Publisher):
         self._logger = get_logger("OrderManager")
         self._order_logger = OrderLogger(log_dir)
         self._handlers = []  # callback for order execution
-        self._exit_manager = None  # Will be set from main.py
+        
+        # Thread manager for async operations
+        self._thread_manager = ThreadManager()
         
         # IPC file for live order data
         self._live_order_file = "data/live_order.json"
@@ -31,8 +34,6 @@ class OrderManager(Subscriber, Publisher):
         
         # Subscribe to trading signal events - CRITICAL for receiving trading signals
         self.subscribe_to_event(EntrySignal, self.on_entry_signal)
-        # TODO: exit manager directly being called, no need of signal event by bus talking
-        # self.subscribe_to_event(ExitSignal, self.on_exit_signal) ## exit manager is a wired service
         
         # this is proof: OrderManager & OrderObject
         self.subscribe_to_event(QuoteEvent, self._on_ltp_update)
@@ -44,10 +45,6 @@ class OrderManager(Subscriber, Publisher):
         if callable(cb):
             self._logger.debug(f"Registering handler {cb.__name__}")
             self._handlers.append(cb)
-    
-    def set_exit_manager(self, exit_manager):
-        """Set the exit manager for handling exits"""
-        self._exit_manager = exit_manager
     
     def _get_exit_steps_from_config(self) -> list:
         """Get exit steps from trading config."""
@@ -101,14 +98,8 @@ class OrderManager(Subscriber, Publisher):
                 "orders": live_orders
             }
             
-            # Write with absolute path for debugging
-            file_path = os.path.abspath("data/live_order.json")
-            # self._logger.info(f"Writing live order data to: {file_path}")
-            
             with open("data/live_order.json", 'w') as f:
                 json.dump(ipc_data, f, indent=2)
-            
-            # self._logger.info(f"Successfully wrote live order data for {len(live_orders)} orders")
             
         except Exception as e:
             self._logger.error(f"Error writing live order data: {e}")
@@ -135,6 +126,7 @@ class OrderManager(Subscriber, Publisher):
         exit_steps = self._get_exit_steps_from_config()
         quantity = self._get_quantity_from_config()
         trail_list = self._get_trail_from_config()
+        
         # Create new order
         try:
             order = OrderObject(
@@ -146,11 +138,11 @@ class OrderManager(Subscriber, Publisher):
                 quantity=quantity,
                 candle=event.candle
             )
+            
         except Exception as e:
             print(f"DEBUG: Error creating OrderObject: {e}")
             self._logger.error(f"Error creating OrderObject: {e}")
             return
-            
 
         self._orders[symbol] = order # to be made atomic
         self._logger.info(f"Created order {symbol} {side} @ {event.price} (Qty: {quantity}, Steps: {len(exit_steps)})")
@@ -168,12 +160,12 @@ class OrderManager(Subscriber, Publisher):
             except Exception as e:
                 self._logger.error(f"Handler error: {e}")
 
-    def _handle_exit_signal(self, exit_event: ExitSignal):
-        """Handle exit signal from exit manager"""
-        symbol = exit_event.symbol
-        exit_price = exit_event.exit_price
-        exit_reason = exit_event.exit_reason
-        quantity = exit_event.quantity
+    def _handle_exit_signal_from_dict(self, exit_info: Dict[str, Any]):
+        """Handle exit signal from OrderObject exit information."""
+        symbol = exit_info['symbol']
+        exit_price = exit_info['exit_price']
+        exit_reason = exit_info['exit_reason']
+        quantity = exit_info['quantity']
         
         self._exit_order(symbol, exit_price, datetime.now(), exit_reason, quantity)
 
@@ -221,17 +213,17 @@ class OrderManager(Subscriber, Publisher):
         """Update LTP and check for exits"""
         if event.instrument in self._orders:
             order = self._orders[event.instrument]
-            order.set_ltp(event.ltp, event.timestamp)
+            
+            # OrderObject now handles exit logic internally and returns exit info
+            exit_info = order.set_ltp(event.ltp, event.timestamp)
 
-            # write through thread pool
-            self._thread_manager.submit(self._write_live_order_data)
+            # Update live order IPC file when LTP changes
+            self._write_live_order_data()
 
-            # Check for exits using exit manager
-            if self._exit_manager:
-                exit_event = self._exit_manager.check_exit(order, event)
-                if exit_event:
-                    self._logger.info(f"📉 Exit signal triggered for {event.instrument}: {exit_event}")
-                    self._handle_exit_signal(exit_event)
+            # Handle exit if OrderObject determined an exit is needed
+            if exit_info:
+                self._logger.info(f"📉 Exit signal triggered for {event.instrument}: {exit_info}")
+                self._handle_exit_signal_from_dict(exit_info)
 
     def update_candle(self, symbol: str, candle: CandleGenerated):
         if symbol in self._orders:
@@ -248,6 +240,23 @@ class OrderManager(Subscriber, Publisher):
 
     def on_entry_signal(self, event: EntrySignal):
         """Handle entry signal events."""
+        try:
+            # Process entry signal and place order
+            self._handle_entry_signal(event)
+            
+        except Exception as e:
+            self._logger.error(f"Error handling entry signal: {e}")
+    
+    def on_exit_signal(self, event: ExitSignal):
+        """Handle exit signal events."""
+        try:
+            self._logger.info(f"📋 Received exit signal for {event.symbol}: {event.direction} at {event.price}")
+            
+            # Process exit signal and close position
+            self.handle_exit_signal(event)
+            
+        except Exception as e:
+            self._logger.error(f"Error handling exit signal: {e}")
         try:
             # self._logger.info(f"📋 Received entry signal for {event.symbol}: {event.direction} at {event.price}")
             # print(f"DEBUG: on_entry_signal received for {event.symbol} side {event.direction}")

@@ -101,29 +101,22 @@ def create_and_register_components(system_config, trading_config):
         components['candle_maker'] = CandleMaker()
         logger.info("   ✅ CandleMaker registered for quote → candle conversion")
         
-        # OrderManager - subscribes to signals, manages orders
+        # OrderManager - subscribes to signals, manages orders (now with integrated exit logic)
         logger.info("   📋 Creating OrderManager...")
         components['order_manager'] = OrderManager()
-        logger.info("   ✅ OrderManager registered for order lifecycle management")
+        logger.info("   ✅ OrderManager registered for order lifecycle management with integrated exits")
         
         # Create strategy components
         logger.info("Creating strategy components...")
         config = trading_config.get()
         
-        # VwapStrategy - subscribes to candles, publishes entry/exit signals
+        # VwapStrategy - subscribes to candles, publishes entry signals
         logger.info("   💡 Creating VwapStrategy...")
         components['vwap_strategy'] = VwapStrategy(config=config)
         logger.info("   ✅ VwapStrategy registered for candle → signal generation")
         
-        # ExitManager - works with OrderManager for exit decisions
-        logger.info("   🚪 Creating ExitManager...")
-        components['exit_manager'] = ExitManager(
-            exit_steps=config.get('exit_steps', []),
-            reterival_exit=config.get('reterival_exit', 0.01),
-            default_quantity=config.get('default_quantity', 75),
-            market_close=config.get('market_close_time')
-        )
-        logger.info("   ✅ ExitManager created for exit condition handling")
+        # Note: ExitManager is no longer needed as exit logic is integrated into OrderObject
+        logger.info("   ✅ Exit logic integrated into OrderObject (no separate ExitManager needed)")
         
         # Create executor using factory
         logger.info("Creating executor...")
@@ -165,7 +158,6 @@ def create_and_register_components(system_config, trading_config):
         logger.info(f"   QuoteEvent subscribers: {len(event_bus._subscribers.get('QuoteEvent', []))}")
         logger.info(f"   CandleGenerated subscribers: {len(event_bus._subscribers.get('CandleGenerated', []))}")
         logger.info(f"   EntrySignal subscribers: {len(event_bus._subscribers.get('EntrySignal', []))}")
-        logger.info(f"   ExitSignal subscribers: {len(event_bus._subscribers.get('ExitSignal', []))}")
         
         logger.info("✅ All components created and registered with EventBus")
         return components
@@ -179,15 +171,10 @@ def wire_component_dependencies(components):
     logger.info("🔗 Wiring component dependencies...")
     
     try:
-        # Currently only wiring OrderManager, ExitManager, and Executor
-        # need to change to event based communication later
+        # Only wire OrderManager and Executor now
+        # ExitManager is no longer needed as exit logic is in OrderObject
         order_manager = components['order_manager']
-        exit_manager = components['exit_manager']
         executor = components['executor']
-        
-        # Wire exit manager to order manager
-        logger.info("   🔗 Connecting ExitManager → OrderManager")
-        order_manager.set_exit_manager(exit_manager)
         
         # Wire executor to order manager
         logger.info("   🔗 Connecting Executor → OrderManager")
