@@ -15,6 +15,7 @@ class OrderObject(Publisher):
         self.logger = get_logger(f"InitOrderObject-{name}")
         self.const_name = name
         self.const_instrument = instrument
+        self.state = "OPEN"
         self.const_side = side.upper()  # 'BUY' or 'SELL'
         
 

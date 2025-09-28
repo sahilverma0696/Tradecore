@@ -52,6 +52,10 @@ class ExitManager:
             # values will be updated in order object
             current_quantity = order.get_current_quantity()
             order.total_quantity -= current_quantity
+            order.filled_quantity += current_quantity
+            order.remaining_quantity = order.total_quantity - order.filled_quantity
+            # TODO: make this increment safe
+            order.current_step_idx += 1
             return self._create_exit_info(order, f'STEP_EXIT_{current_step_idx}', current_quantity, 'PARTIAL')
 
         return None
@@ -81,6 +85,7 @@ class ExitManager:
         if( difference_percentage >= trigger and trigger > 0):
             remaining_quantity = order.get_remaining_quantity()
             order.total_quantity = 0  # Set total quantity to 0 to indicate full exit
+            order.state = "CLOSED"
             return self._create_exit_info(order, 'RETRIEVAL_TRIGGER', remaining_quantity, 'FULL')
         return None
 
