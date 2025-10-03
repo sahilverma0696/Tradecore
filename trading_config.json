@@ -1,6 +1,6 @@
 {
-  "api_key": "zy7p41049ggnphlu",
-  "api_secret": "70mrzeu71ce5ukknuzzwzzn8nmizoi93",
+  "api_key": "_",
+  "api_secret": "_",
   "symbols": ["btcusdt"],
   "name_symbol": "btcusdt",
   "paper_trade": true,
@@ -35,25 +35,7 @@
       "instrument_map": {}
     }
   },
-  "exit_steps": [
-    [0.002, 0.3],
-    [0.004, 0.3],
-    [0.005, 0.3],
-    [0.007, 0.3],
-    [0.01, 0.3]
-  ],
-  "quantities": [
-    100,
-    75,
-    50,
-    25,
-    10
-  ],
-  "trails":[
-    0.01,
-    0.02,
-    0.03
-  ],
+  "quantity": "100",
   "reterival_exit": 0.1,
   "market_close_time": "13:39",
   "default_quantity": 75,

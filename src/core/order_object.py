@@ -7,10 +7,17 @@ from typing import Optional, Dict, Any
 
 
 class OrderObject(Publisher):
-    def __init__(self, name, instrument, step, trail, side, quantity, candle: CandleGenerated):
+    '''
+    Data + Logic container, 
+    Contains the data 
+    Updates the data 
+    Has inbuild logic for exit management via ExitManager Event based
+    '''
+    def __init__(self, name, instrument, trail, side, quantity, candle: CandleGenerated):
         # TODO: implement market close logic: 1337
         # no default values, the system expects to be having values from config
         # else it fails
+        
         # basic information
         self.logger = get_logger(f"InitOrderObject-{name}")
         self.const_name = name
@@ -20,14 +27,11 @@ class OrderObject(Publisher):
         
 
         # information from config and is in steps
-        self.current_step_idx = 0 # this index determines, step exit, step quantity, in future step trigger as well
-        self.step = step  # array of step exit values, in percentage
-        self.current_step = self.step[0]
-        self.step_quantity = quantity # array of step exit, these are constant values, not percentage
+        self.quantity = quantity # array of step exit, these are constant values, not percentage
         
         # types of stops
         # profit stop
-        self.trigger = trail[0]   # trigger is a single percentage value, which triggers from min || max fall
+        self.trigger = trail   # trigger is a single percentage value, which triggers from min || max fall
         # this is entry stop, in case the signal is not promising enough
         self.zero_stop = 0  # to set as the entry price based on side, after 1 minute of entry
         # this is loss stop, in case of direction switch, although at zero_stop should change the side of order so this should not be triggered, if this is triggered there is gap in system
@@ -38,17 +42,12 @@ class OrderObject(Publisher):
         self.current_candle: CandleGenerated = candle
         
         self.ltp = 0  # most important guy in the team
-        
-        # derived information
-        self.total_quantity = sum(self.step_quantity)
-        self.filled_quantity = 0
-        self.remaining_quantity = self.total_quantity # this is derived from total - filled
-        
+                
         # Initialize exit manager as a library
         self.exit_manager = ExitManager(f"ExitManager-{name}")
 
         
-        self.logger.debug(f"Creating OrderObject: {name}, Instrument: {instrument}, Side: {side}, Step: {self.step}, Trail: {self.trigger}, Quantity: {self.step_quantity}")
+        self.logger.debug(f"Creating OrderObject: {name}, Instrument: {instrument}, Side: {side}, Trail: {self.trigger}, Quantity: {self.step_quantity}")
 
         # Entry & timestamps
         # entry price can be zero, this is normal
@@ -72,7 +71,6 @@ class OrderObject(Publisher):
 
     def set_ltp(self, ltp, timestamp=None) -> Optional[Dict[str, Any]]:
         """Set LTP and return exit information if exit conditions are met."""
-        previous_step_idx = self.current_step_idx
         
         # Update order state
         self.ltp = ltp
@@ -86,33 +84,32 @@ class OrderObject(Publisher):
                 symbol=self.const_name,
                 direction=opposite_side,
                 price=ltp,
-                quantity=exit_info['quantity'],
+                quantity=self.quantity,
                 exit_type=exit_info['exit_type'],
                 reason=exit_info['reason']
             )
             self.publish(exitEvent)
-
-        self._update_min_max_price(ltp)
-        self._update_performance_metrics()
-        # exit manager to be called here to check, if there is a step exit condition met
-        # if true, it will return a condition, will make a signal out of it,
-        # then the update step will be called to update the step and trigger accordingly
-        self.update_step()
-        self.last_update_time = timestamp or datetime.now()
-        self._timestamp = self.last_update_time
+            
+            # set order state to closed
+            self.state = "CLOSED"
+            #archive it to be just in order logs for analysis
+            # and return 
+        else:
+            self._update_min_max_price(ltp)
+            self._update_performance_metrics()
+            self.last_update_time = timestamp or datetime.now()
+            self._timestamp = self.last_update_time
 
         # there is no order state, the real orderObject is checked in the exit manager
         
-        
-
         # Check for step-based exits if step changed
-        if self.current_step_idx != previous_step_idx:
-            self.logger.info(f"Step changed for {self.const_name}: {previous_step_idx} → {self.current_step_idx}")
+        # if self.current_step_idx != previous_step_idx:
+        #     self.logger.info(f"Step changed for {self.const_name}: {previous_step_idx} → {self.current_step_idx}")
             
-            if not exit_info:
-                exit_info = self.exit_manager.check_step_exit(order_state, previous_step_idx)
+        #     if not exit_info:
+        #         exit_info = self.exit_manager.check_step_exit(order_state, previous_step_idx)
         
-        return exit_info
+        # return exit_info
 
     def _get_order_state(self) -> Dict[str, Any]:
         """Get current order state for exit manager."""

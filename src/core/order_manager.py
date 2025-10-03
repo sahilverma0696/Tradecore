@@ -15,6 +15,9 @@ class OrderManager(Subscriber, Publisher):
     
     def __init__(self, log_dir: str = "logs"):
         super().__init__()  # Initialize both mixins
+        
+        # the main dict of all orders
+        # TODO: able to move the closed orders to archive
         self._orders: Dict[str, OrderObject] = {}   # symbol -> OrderObject
         self._logger = get_logger("OrderManager")
         self._order_logger = OrderLogger(log_dir)
@@ -46,19 +49,8 @@ class OrderManager(Subscriber, Publisher):
             self._logger.debug(f"Registering handler {cb.__name__}")
             self._handlers.append(cb)
     
-    def _get_exit_steps_from_config(self) -> list:
-        """Get exit steps from trading config."""
-        return self._trading_config.get('exit_steps')
-    
-    def _get_quantity_from_config(self) -> list:
-        """Get quantity array from trading config for a specific symbol."""
-        quantities = self._trading_config.get('quantities')
-        return quantities
-    
-    def _get_trail_from_config(self, symbol: str = None) -> list:
-        """Get trail array from trading config"""
-        return self._trading_config.get('trails')
 
+    # TODO: maybe this can shift inside the order object, and send signal from there to update the order itself to IPC
     def _write_live_order_data(self):
         """Write current live order data to JSON file for IPC with CLI dashboard."""
         try:
@@ -115,50 +107,52 @@ class OrderManager(Subscriber, Publisher):
         existing_order = self._orders.get(symbol)
         if existing_order:
             if existing_order.get_side() != side:
-                # Close opposite direction order and create new one
+                # Closing order in opposite direction
+                # EXIT CASE 1 : Direction switch, profit negative
+                # this is the only case where an exit signal is generated from entry signal
                 self._logger.info(f"Switching direction for {symbol} from {existing_order.get_side()} to {side}")
-                self._exit_order(symbol, event.price, datetime.now(), "DIRECTION_SWITCH")
+                self._execute_order(existing_order,type ='EXIT')
             else:
-                self._logger.warning(f"Order {symbol} already exists with same direction")
+                #TODO FUTURE: this info for same side can be used to add boost logic or exit logic
+                self._logger.info(f"Duplicate entry signal, same side for {symbol}, ignoring.")
                 return
 
-        # Get configuration values from trading config
-        exit_steps = self._get_exit_steps_from_config()
-        quantity = self._get_quantity_from_config()
-        trail_list = self._get_trail_from_config()
-        
         # Create new order
         try:
             order = OrderObject(
                 name=symbol,
                 instrument=event.symbol,
-                step=[s[0] for s in exit_steps], 
-                trail=trail_list,
+                trail=self._trading_config.get('trail'),
                 side=side,
-                quantity=quantity,
+                quantity=self._trading_config.get('quantity'),
                 candle=event.candle
             )
             
         except Exception as e:
-            print(f"DEBUG: Error creating OrderObject: {e}")
-            self._logger.error(f"Error creating OrderObject: {e}")
+            print(f"ORDER OBJECT CREATION FAIL: {symbol}: {e}")
+            self._logger.error(f"ORDER OBJECT CREATION FAIL: {symbol}: {e}")
             return
 
-        self._orders[symbol] = order # to be made atomic
-        self._logger.info(f"Created order {symbol} {side} @ {event.price} (Qty: {quantity}, Steps: {len(exit_steps)})")
+        #TODO: Send this order object to executioner
+        
+        self._execute_order(order,type="ENTRY")
+        self._orders[symbol] = order # ?to be made atomic: no, event based system in market order, system expects liquidity in the market
+        self._logger.info(f"Created order {symbol} {side} @ {event.price}")
         self._order_logger.log_entry(order)
         
         # Update live order IPC file
         self._write_live_order_data()
         
-        # Execute order
-        for cb in self._handlers:
-            try:
-                # Send to executioner: symbol, direction, timestamp
-                direction = "B" if side == "BUY" else "S"
-                cb(event.symbol, direction, getattr(event, 'timestamp', datetime.now()))
-            except Exception as e:
-                self._logger.error(f"Handler error: {e}")
+        # Why is this here?, is this dead code, based on callbacks ?
+        # # Execute order
+        # for cb in self._handlers:
+        #     try:
+        #         # Send to executioner: symbol, direction, timestamp
+        #         # update: send executioner order object
+        #         direction = "B" if side == "BUY" else "S"
+        #         cb(event.symbol, direction, getattr(event, 'timestamp', datetime.now()))
+        #     except Exception as e:
+        #         self._logger.error(f"Handler error: {e}")
 
     def _handle_exit_signal_from_dict(self, exit_info: Dict[str, Any]):
         """Handle exit signal from OrderObject exit information."""
@@ -169,36 +163,20 @@ class OrderManager(Subscriber, Publisher):
         
         self._exit_order(symbol, exit_price, datetime.now(), exit_reason, quantity)
 
-    def _exit_order(self, symbol: str, exit_price: float, timestamp: datetime, exit_reason: str, quantity: int = None):
-        """Exit an order and execute the exit trade"""
-        order = self._orders.get(symbol)
-        if not order:
-            return
-
-        # Use full quantity if not specified
-        if quantity is None:
-            quantity = order.total_quantity
-
-        # Log exit
-        self._logger.info(f"Exiting order {symbol}: {exit_reason} @ {exit_price}")
-        self._order_logger.log_exit(order, exit_reason, exit_price)
+    def _execute_order(self, order: OrderExecuted,type:str):
+        """
+        For cases when we need to send 
+        """
+        if type == 'EXIT':
+            #reverse the side and make event
+            pass
+        elif type == 'ENTRY':
+            # execute the side as it is 
+            pass
+        #TODO: send execute event to exectuner
+        #TODO: mark this order as closed, archive it
         
-        # Execute exit order
-        for cb in self._handlers:
-            try:
-                # Send opposite direction to executioner
-                exit_direction = "S" if order.get_side() == "BUY" else "B"
-                cb(order.get_instrument(), exit_direction, timestamp)
-            except Exception as e:
-                self._logger.error(f"Exit handler error: {e}")
-
-        # Remove order if fully exited
-        if quantity >= order.total_quantity:
-            self._orders.pop(symbol, None)
-        
-        # Update live order IPC file after exit
-        self._write_live_order_data()
-
+        # since this is a an event based system, the sync flow is not expected in functions
     def _handle_update_candle(self, event: CandleGenerated):
         """Handle candle update events."""
         if event.symbol in self._orders:
@@ -214,16 +192,16 @@ class OrderManager(Subscriber, Publisher):
         if event.instrument in self._orders:
             order = self._orders[event.instrument]
             
-            # OrderObject now handles exit logic internally and returns exit info
-            exit_info = order.set_ltp(event.ltp, event.timestamp)
+            # OrderObject now handles exit logic internally and returns if exit true
+            exit_true = order.set_ltp(event.ltp, event.timestamp)
 
             # Update live order IPC file when LTP changes
             self._write_live_order_data()
 
             # Handle exit if OrderObject determined an exit is needed
-            if exit_info:
-                self._logger.info(f"📉 Exit signal triggered for {event.instrument}: {exit_info}")
-                self._handle_exit_signal_from_dict(exit_info)
+            if exit_true:
+                self._logger.info(f"📉 Exit signal triggered for {event.instrument}: {exit_true}")
+                self._handle_exit_signal_from_dict(exit_true)
 
     def update_candle(self, symbol: str, candle: CandleGenerated):
         if symbol in self._orders:
@@ -265,16 +243,3 @@ class OrderManager(Subscriber, Publisher):
             
         except Exception as e:
             self._logger.error(f"Error handling entry signal: {e}")
-    
-    def on_exit_signal(self, event: ExitSignal):
-        """Handle exit signal events."""
-        try:
-            self._logger.info(f"📋 Received exit signal for {event.symbol}: {event.direction} at {event.price}")
-            
-            # Process exit signal and close position
-            self.handle_exit_signal(event)
-            
-        except Exception as e:
-            self._logger.error(f"Error handling exit signal: {e}")
-            self._logger.error(f"Error handling exit signal: {e}")
-            self._logger.error(f"Error handling exit signal: {e}")

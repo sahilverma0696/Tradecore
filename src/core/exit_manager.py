@@ -1,7 +1,9 @@
 from datetime import datetime
-from typing import Optional, Dict, Any
-from src.core.order_object import OrderObject
+from typing import Optional, Dict, Any, TYPE_CHECKING
 from src.logger_factory import get_logger
+
+if TYPE_CHECKING:
+    from src.core.order_object import OrderObject
 
 
 class ExitManager:
@@ -24,7 +26,7 @@ class ExitManager:
         self.dust_value = 0.01
         
     # step based exits
-    def _check_step_exit(self, order: OrderObject) -> Optional[Dict[str, Any]]:
+    def _check_step_exit(self, order: 'OrderObject') -> Optional[Dict[str, Any]]:
         """
         Check if step change triggers partial profit exit.
 
@@ -60,7 +62,7 @@ class ExitManager:
 
         return None
 
-    def _check_profit_exit(self, order: OrderObject) -> Optional[Dict[str, Any]]:
+    def _check_profit_exit(self, order: 'OrderObject') -> Optional[Dict[str, Any]]:
         """
         Check if profit exit is triggered.
         keeping this as a function in case future ways are added
@@ -70,7 +72,7 @@ class ExitManager:
 
 
     # trigger based exits
-    def _check_retrieval_trigger_exit(self, order: OrderObject) -> Optional[Dict[str, Any]]:
+    def _check_retrieval_trigger_exit(self, order: 'OrderObject') -> Optional[Dict[str, Any]]:
         '''
         Check if retrieval trigger exit is triggered.
         '''
@@ -89,7 +91,7 @@ class ExitManager:
             return self._create_exit_info(order, 'RETRIEVAL_TRIGGER', remaining_quantity, 'FULL')
         return None
 
-    def _check_zero_stop_exit(self, order: OrderObject) -> Optional[Dict[str, Any]]:
+    def _check_zero_stop_exit(self, order: 'OrderObject') -> Optional[Dict[str, Any]]:
         '''
         Check if zero stop exit is triggered.
         '''
@@ -101,7 +103,7 @@ class ExitManager:
             return self._create_exit_info(order, 'ZERO_STOP')
         return None
 
-    def _check_hard_stop_exit(self, order: OrderObject) -> Optional[Dict[str, Any]]:
+    def _check_hard_stop_exit(self, order: 'OrderObject') -> Optional[Dict[str, Any]]:
         '''
         Check if hard stop exit is triggered.
         '''
@@ -114,7 +116,8 @@ class ExitManager:
             return self._create_exit_info(order, 'HARD_STOP')
         return None
 
-    def _check_on_trigger_exit(self, order: OrderObject) -> Optional[Dict[str, Any]]:
+    def _check_on_trigger_exit(self, order: 'OrderObject') -> Optional[Dict[str, Any]]:
+        
         # TODO: future, convert to enum based flags
         """
             Check if any trigger-based exit conditions are met.
@@ -135,10 +138,10 @@ class ExitManager:
         return None
 
     # market close exit: to be implemented
-    def _check_market_close_exit(self, order: OrderObject) -> bool:
+    def _check_market_close_exit(self, order: 'OrderObject') -> bool:
         return False
 
-    def check(self, order: OrderObject) -> dict:
+    def check(self, order: 'OrderObject') -> Optional[Dict[str, Any]]:
         """
         Check all exit conditions based on order state.
         """
@@ -148,16 +151,12 @@ class ExitManager:
         if trigger:
             return trigger
 
-        # Check step-based exits
-        step_profit = self._check_profit_exit(order)
-        if step_profit:
-            return step_profit
 
         # TODO: check market close exit
 
         return None
 
-    def _create_exit_info(self, order: OrderObject, exit_reason: str, quantity: int, exit_type: str) -> Dict[str, Any]:
+    def _create_exit_info(self, order: 'OrderObject', exit_reason: str, quantity: int, exit_type: str) -> Dict[str, Any]:
         """Create standardized exit information dictionary."""
         return {
             'symbol': order.get('name'),
