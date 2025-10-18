@@ -11,7 +11,7 @@ class OrderObject(Publisher):
     Data + Logic container, 
     Contains the data 
     Updates the data 
-    Has inbuild logic for exit management via ExitManager Event based
+    Has inbuild logic for exit management via ExitManager Event based ( stop loss in here )
     '''
     def __init__(self, name, instrument, trail, side, quantity, candle: CandleGenerated):
         # TODO: implement market close logic: 1337
@@ -31,11 +31,14 @@ class OrderObject(Publisher):
         
         # types of stops
         # profit stop
-        self.trigger = trail   # trigger is a single percentage value, which triggers from min || max fall
+        self.trigger = trail   # trigger is a single percentage value in decimal ?, which triggers from min || max fall
+        
+        #TODO: future release 
+        # profite stop, this will be triigered on some profit such that, trading fee is saved atleast 
         # this is entry stop, in case the signal is not promising enough
         self.zero_stop = 0  # to set as the entry price based on side, after 1 minute of entry
         # this is loss stop, in case of direction switch, although at zero_stop should change the side of order so this should not be triggered, if this is triggered there is gap in system
-        self.hard_stop = 0  # this is the absolute hard stop, this will be set some percentage away from entry price based on side
+        self.loss_stop = 0  # this is the absolute hard stop, this will be set some percentage away from entry price based on side
         
         # this works as the entry candle: gives the entry price, and then updated with every candle, for monitoring purpose
         # this step will update by confimation from the executor for the market price on which entry actually happened

@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Optional, Dict, Any, TYPE_CHECKING
 from src.logger_factory import get_logger
-
+from src.time_control import TimeChecker
 if TYPE_CHECKING:
     from src.core.order_object import OrderObject
 
@@ -24,15 +24,13 @@ class ExitManager:
     def __init__(self, name: str = "ExitManager"):
         self.logger = get_logger(name)
         self.dust_value = 0.01
+        self.time = TimeChecker()
         
     # step based exits
     def _check_step_exit(self, order: 'OrderObject') -> Optional[Dict[str, Any]]:
         """
         Check if step change triggers partial profit exit.
-
-        Args:
-            order: OrderObject containing order state information
-
+        THIS IS PROFIT EXIT
         """
 
         current_step_idx = order.get_current_step_idx()
@@ -62,19 +60,13 @@ class ExitManager:
 
         return None
 
-    def _check_profit_exit(self, order: 'OrderObject') -> Optional[Dict[str, Any]]:
-        """
-        Check if profit exit is triggered.
-        keeping this as a function in case future ways are added
-        """
-        # checks if step exit is triggered
-        return self._check_step_exit(order)
-
 
     # trigger based exits
+    #TODO: set the quantity, it's a single quantity to be returned
     def _check_retrieval_trigger_exit(self, order: 'OrderObject') -> Optional[Dict[str, Any]]:
         '''
         Check if retrieval trigger exit is triggered.
+        THIS IS SAVING PROFIT EXIT
         '''
         trigger = order.get_current_trigger() *100 # convert to percentage
         side = order.get_side()
@@ -91,9 +83,18 @@ class ExitManager:
             return self._create_exit_info(order, 'RETRIEVAL_TRIGGER', remaining_quantity, 'FULL')
         return None
 
+    def _check_net_zero_stop_exit(self,order: 'OrderObject') -> Optional[Dict[str,Any]]:
+        '''
+        THIS IS A NET ZERO EXIT 
+        this is step after sometime, this becomes a net 0 profit
+        considers transaction and taxes charges taking trade to no loss
+        '''
+        return False
+    
     def _check_zero_stop_exit(self, order: 'OrderObject') -> Optional[Dict[str, Any]]:
         '''
         Check if zero stop exit is triggered.
+        THIS IS LOSS STOP
         '''
         ltp = order.get_ltp()
         entry_price = order.get_entry_price()
@@ -106,6 +107,7 @@ class ExitManager:
     def _check_hard_stop_exit(self, order: 'OrderObject') -> Optional[Dict[str, Any]]:
         '''
         Check if hard stop exit is triggered.
+        This is a LOSS STOP
         '''
         ltp = order.get_ltp()
         entry_price = order.get_entry_price()
@@ -115,6 +117,14 @@ class ExitManager:
         if (side == "BUY" and ltp <= entry_price - threshold) or (side == "SELL" and ltp >= entry_price + threshold):
             return self._create_exit_info(order, 'HARD_STOP')
         return None
+    
+    # market close exit: to be implemented
+    def _check_market_close_exit(self, order: 'OrderObject') -> bool:
+        #TODO: read from config the market close time 
+        market_close_time = '13:37'
+        if self.time.is_same_time(market_close_time):
+            return self._create_exit_info(order,'MARKET CLOSE',order.quantity,'FULL')
+        return False
 
     def _check_on_trigger_exit(self, order: 'OrderObject') -> Optional[Dict[str, Any]]:
         
@@ -126,36 +136,28 @@ class ExitManager:
                 Exit reason string if any trigger condition is met, else empty string.
         """ 
         
+        # currently returning only in reterival exit
+        # step_exit = self._check_step_exit(order)
+        # if step_exit is not None:
+        #     return step_exit
         hard_stop = self._check_hard_stop_exit(order)
         if hard_stop is not None:
             return hard_stop
         zero_stop = self._check_zero_stop_exit(order)
         if zero_stop is not None:
             return zero_stop
+        # net_zero = self._check_net_zero_stop_exit(order)
+        # if net_zero is not None:
+        #     return net_zero
         retrieval_trigger = self._check_retrieval_trigger_exit(order)
         if retrieval_trigger is not None:
             return retrieval_trigger
+        market_close = self._check_market_close_exit(order)
+        if market_close is not None:
+            return market_close
         return None
 
-    # market close exit: to be implemented
-    def _check_market_close_exit(self, order: 'OrderObject') -> bool:
-        return False
-
-    def check(self, order: 'OrderObject') -> Optional[Dict[str, Any]]:
-        """
-        Check all exit conditions based on order state.
-        """
-        
-        # check trigger based exits
-        trigger = self._check_on_trigger_exit(order)
-        if trigger:
-            return trigger
-
-
-        # TODO: check market close exit
-
-        return None
-
+    
     def _create_exit_info(self, order: 'OrderObject', exit_reason: str, quantity: int, exit_type: str) -> Dict[str, Any]:
         """Create standardized exit information dictionary."""
         return {
@@ -166,6 +168,20 @@ class ExitManager:
             'quantity': quantity,
         }
     
+    def check(self, order: 'OrderObject') -> Optional[Dict[str, Any]]:
+        """
+        Check all exit conditions based on order state.
+        """
+        # check step exit 
+        
+        # check trigger based exits
+        trigger = self._check_on_trigger_exit(order)
+        if trigger:
+            return trigger
+
+        return None
+
+
     # updates in order values should be calculated in OrderObject only, ExitManager just provides checks
     def calculate_performance_metrics(self, order_state: Dict[str, Any]) -> Dict[str, float]:
         """
