@@ -1,12 +1,14 @@
 from datetime import datetime
 from typing import Optional, Dict, Any, TYPE_CHECKING
+from src.core.event_bus.events import ExitSignal
+from src.core.event_bus.mixins import Publisher
 from src.logger_factory import get_logger
 from src.time_control import TimeChecker
 if TYPE_CHECKING:
     from src.core.order_object import OrderObject
 
 
-class ExitManager:
+class ExitManager(Publisher):
     """
     Exit management library for order objects.
     Works on trailing stops, retrieval exits, and market close exits.
@@ -22,9 +24,11 @@ class ExitManager:
     """
     
     def __init__(self, name: str = "ExitManager"):
+        super().__init__()
         self.logger = get_logger(name)
         self.dust_value = 0.01
         self.time = TimeChecker()
+        
         
     # step based exits
     def _check_step_exit(self, order: 'OrderObject') -> Optional[Dict[str, Any]]:
@@ -89,6 +93,8 @@ class ExitManager:
         this is step after sometime, this becomes a net 0 profit
         considers transaction and taxes charges taking trade to no loss
         '''
+        if abs(order.ltp - order.net_zero_stop) <= 1 and order.net_zero_state:
+            return True
         return False
     
     def _check_zero_stop_exit(self, order: 'OrderObject') -> Optional[Dict[str, Any]]:
@@ -97,11 +103,10 @@ class ExitManager:
         THIS IS LOSS STOP
         '''
         ltp = order.get_ltp()
-        entry_price = order.get_entry_price()
         # this is around entry price, say within 0.1% of entry price
-        threshold = self.dust_value * entry_price  # 0.01 of entry price
-        if abs(ltp - entry_price) <= threshold:
-            return self._create_exit_info(order, 'ZERO_STOP')
+        threshold = self.dust_value * order.const_entry_price  # 0.01 of entry price
+        if abs(ltp - order.const_entry_price) <= threshold and order.zero_stop_state:
+            return self._create_exit_info(order, 'ZERO_STOP', order.quantity,'FULL')
         return None
 
     def _check_hard_stop_exit(self, order: 'OrderObject') -> Optional[Dict[str, Any]]:
@@ -115,7 +120,7 @@ class ExitManager:
         threshold = 0.02 * entry_price  # 2% of entry price
         side = order.get_side()
         if (side == "BUY" and ltp <= entry_price - threshold) or (side == "SELL" and ltp >= entry_price + threshold):
-            return self._create_exit_info(order, 'HARD_STOP')
+            return self._create_exit_info(order, 'HARD_STOP', order.quantity,'FULL')
         return None
     
     # market close exit: to be implemented
@@ -143,15 +148,19 @@ class ExitManager:
         hard_stop = self._check_hard_stop_exit(order)
         if hard_stop is not None:
             return hard_stop
+        
         zero_stop = self._check_zero_stop_exit(order)
         if zero_stop is not None:
             return zero_stop
-        # net_zero = self._check_net_zero_stop_exit(order)
-        # if net_zero is not None:
-        #     return net_zero
+        
+        net_zero = self._check_net_zero_stop_exit(order)
+        if net_zero is not None:
+            return net_zero
+        
         retrieval_trigger = self._check_retrieval_trigger_exit(order)
         if retrieval_trigger is not None:
             return retrieval_trigger
+        
         market_close = self._check_market_close_exit(order)
         if market_close is not None:
             return market_close
@@ -161,11 +170,11 @@ class ExitManager:
     def _create_exit_info(self, order: 'OrderObject', exit_reason: str, quantity: int, exit_type: str) -> Dict[str, Any]:
         """Create standardized exit information dictionary."""
         return {
-            'symbol': order.get('name'),
-            'exit_price': order.get('ltp'),
+            'symbol': order.get_name(),
+            'exit_price': order.get_ltp(),
             'exit_reason': exit_reason,
             'exit_type': exit_type,
-            'quantity': quantity,
+            'quantity': order.quantity,
         }
     
     def check(self, order: 'OrderObject') -> Optional[Dict[str, Any]]:
@@ -176,11 +185,26 @@ class ExitManager:
         
         # check trigger based exits
         trigger = self._check_on_trigger_exit(order)
-        if trigger:
-            return trigger
 
-        return None
-
+        if trigger is not None and trigger is True:
+            # create exit signal and send it to executor
+            # Send exit signal with opposite side
+            print('exit trigger true', trigger)
+            opposite_side = "SELL" if order.const_side == "BUY" else "BUY"
+            exitEvent = ExitSignal(
+                symbol=order.const_name,
+                direction=opposite_side,
+                price=order.ltp,
+                quantity=order.quantity,
+                exit_type='FULL',
+                reason='trigger',
+                timestamp=order._timestamp,
+                source='Exit manager'
+            )
+            
+            self.publish_event(exitEvent)
+            return True
+            
 
     # updates in order values should be calculated in OrderObject only, ExitManager just provides checks
     def calculate_performance_metrics(self, order_state: Dict[str, Any]) -> Dict[str, float]:

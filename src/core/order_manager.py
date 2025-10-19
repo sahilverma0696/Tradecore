@@ -17,7 +17,7 @@ class OrderManager(Subscriber, Publisher):
         super().__init__()  # Initialize both mixins
         
         # the main dict of all orders
-        # TODO: able to move the closed orders to archive
+        # TODO: able to move the closed orders to archive, logging benefit
         self._orders: Dict[str, OrderObject] = {}   # symbol -> OrderObject
         self._logger = get_logger("OrderManager")
         self._order_logger = OrderLogger(log_dir)
@@ -64,11 +64,11 @@ class OrderManager(Subscriber, Publisher):
                     "symbol": symbol,
                     "instrument": order.get_instrument(),
                     "side": order.get_side(),
-                    "total_quantity": order.get_total_quantity(),
-                    "current_quantity": order.get_current_quantity(),
-                    "remaining_quantity": order.get_remaining_quantity(),
+                    "total_quantity": order.quantity,
+                    "current_quantity": order.quantity,
+                    "remaining_quantity": order.quantity,
                     "entry_price": order.get_entry_price(),
-                    "current_trail": order.get_current_trail(),
+                    "current_trail": 0,
                     "current_ltp": order.get_ltp(),
                     "current_profit_percentage": order.get_current_profit_percentage(),
                     "current_profit": order.get_current_profit(),
@@ -143,16 +143,6 @@ class OrderManager(Subscriber, Publisher):
         # Update live order IPC file
         self._write_live_order_data()
         
-        # Why is this here?, is this dead code, based on callbacks ?
-        # # Execute order
-        # for cb in self._handlers:
-        #     try:
-        #         # Send to executioner: symbol, direction, timestamp
-        #         # update: send executioner order object
-        #         direction = "B" if side == "BUY" else "S"
-        #         cb(event.symbol, direction, getattr(event, 'timestamp', datetime.now()))
-        #     except Exception as e:
-        #         self._logger.error(f"Handler error: {e}")
 
     def _handle_exit_signal_from_dict(self, exit_info: Dict[str, Any]):
         """Handle exit signal from OrderObject exit information."""
@@ -192,16 +182,12 @@ class OrderManager(Subscriber, Publisher):
         if event.instrument in self._orders:
             order = self._orders[event.instrument]
             
-            # OrderObject now handles exit logic internally and returns if exit true
-            exit_true = order.set_ltp(event.ltp, event.timestamp)
+            # OrderObject now handles exit logic internally
+            order.set_ltp(event.ltp, event.timestamp)
 
             # Update live order IPC file when LTP changes
             self._write_live_order_data()
 
-            # Handle exit if OrderObject determined an exit is needed
-            if exit_true:
-                self._logger.info(f"📉 Exit signal triggered for {event.instrument}: {exit_true}")
-                self._handle_exit_signal_from_dict(exit_true)
 
     def update_candle(self, symbol: str, candle: CandleGenerated):
         if symbol in self._orders:
