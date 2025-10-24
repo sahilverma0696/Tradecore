@@ -1,3 +1,4 @@
+# This class is proof
 import csv
 from datetime import datetime
 from collections import defaultdict
