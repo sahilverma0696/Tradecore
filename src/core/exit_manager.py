@@ -4,6 +4,7 @@ from src.core.event_bus.events import ExitSignal
 from src.core.event_bus.mixins import Publisher
 from src.logger_factory import get_logger
 from src.time_control import TimeChecker
+import src.basic as basic
 if TYPE_CHECKING:
     from src.core.order_object import OrderObject
 
@@ -109,18 +110,17 @@ class ExitManager(Publisher):
             return self._create_exit_info(order, 'ZERO_STOP', order.quantity,'FULL')
         return None
 
-    def _check_hard_stop_exit(self, order: 'OrderObject') -> Optional[Dict[str, Any]]:
+    def _check_loss_stop_exit(self, order: 'OrderObject') -> Optional[Dict[str, Any]]:
         '''
         Check if hard stop exit is triggered.
         This is a LOSS STOP
         '''
         ltp = order.get_ltp()
-        entry_price = order.get_entry_price()
-        # this is in case of ltp is below 2% of entry price in BUY and above 2% in SELL
-        threshold = 0.0002 * entry_price  # 2% of entry price
-        side = order.get_side()
-        if (side == "BUY" and ltp <= entry_price - threshold) or (side == "SELL" and ltp >= entry_price + threshold):
-            return self._create_exit_info(order, 'HARD_STOP', order.quantity,'FULL')
+        loss_stop = order.loss_stop
+    
+        if basic.tolerance(ltp,loss_stop):
+            print("LOSS STOP HIT")
+            return self._create_exit_info(order, 'LOSS_STOP', order.quantity,'FULL')
         return None
     
     # market close exit: to be implemented
@@ -145,9 +145,9 @@ class ExitManager(Publisher):
         # step_exit = self._check_step_exit(order)
         # if step_exit is not None:
         #     return step_exit
-        hard_stop = self._check_hard_stop_exit(order)
-        if hard_stop is not None:
-            return hard_stop
+        loss_stop = self._check_loss_stop_exit(order)
+        if loss_stop is not None:
+            return loss_stop
         
         zero_stop = self._check_zero_stop_exit(order)
         if zero_stop is not None:

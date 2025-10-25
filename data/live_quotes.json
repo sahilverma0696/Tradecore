@@ -1,9 +1,9 @@
 {
   "BTCUSDT": {
     "symbol": "BTCUSDT",
-    "ltp": 111454.87,
-    "ltq": 0.0162,
-    "timestamp": "2025-10-25T11:06:38.215000",
+    "ltp": 111531.43,
+    "ltq": 0.00019,
+    "timestamp": "2025-10-25T23:34:13.797000",
     "source": "BinanceStreamer"
   }
 }

@@ -9,6 +9,7 @@ from src.core.order_object import OrderObject
 from src.core.order_logger import OrderLogger
 from src.config_manager import ConfigManager
 from src.core.thread_manager import ThreadManager, ThreadPoolType
+import src.basic as basic
 
 class OrderManager(Subscriber, Publisher):
     """Manages order lifecycle and execution."""
@@ -217,7 +218,7 @@ class OrderManager(Subscriber, Publisher):
                     "instrument": order.get_instrument(),
                     "side": order.get_side(),
                     "total_quantity": order.quantity,
-                    "entry_price": order.const_entry_price,
+                    "entry_price": basic.round4(order.const_entry_price),
                     "net_stop": order.net_zero_stop,
                     "zero_stop": order.zero_stop,
                     "loss_stop": order.loss_stop,
@@ -229,7 +230,7 @@ class OrderManager(Subscriber, Publisher):
                     "min_move_percentage": order.get_min_move_percentage(),
                     "entry_time": order.get_entry_time().isoformat() if order.get_entry_time() else None,
                     "last_update": datetime.now().isoformat(),
-                    "status": "ACTIVE",
+                    "status": order.state,
                     "exit_steps": order.step if hasattr(order, 'step') else [],
                     "trail_steps": order.trail if hasattr(order, 'trail') else []
                 }

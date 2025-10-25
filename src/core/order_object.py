@@ -5,6 +5,7 @@ from src.logger_factory import get_logger
 from src.core.exit_manager import ExitManager
 from typing import Optional, Dict, Any
 import time
+import src.basic as basic
 
 class OrderObject(Publisher):
     '''
@@ -45,7 +46,7 @@ class OrderObject(Publisher):
         
         #TODO: read from trading config, very important 
         # this is loss stop, in case of direction switch, although at zero_stop should change the side of order so this should not be triggered, if this is triggered there is gap in system
-        self.loss_stop = self.const_entry_price * (0.9998 if side == "BUY" else 1.0002)
+        self.loss_stop = basic.round4(self.const_entry_price * (0.9998 if side == "BUY" else 1.0002))
 
         
         # net zero stop, to be set such that no loss happens
@@ -173,10 +174,10 @@ class OrderObject(Publisher):
     def get_name(self): return self.const_name
     def get_instrument(self): return self.const_instrument
     def get_ltp(self): return self.ltp
-    def get_max_move_percentage(self): return self.max_move_percentage
-    def get_min_move_percentage(self): return self.min_move_percentage
-    def get_current_profit_percentage(self): return self.current_profit_percentage
-    def get_current_profit(self): return self.current_profit
-    def get_retreat(self): return self.retreat
+    def get_max_move_percentage(self): return basic.round4(self.max_move_percentage)
+    def get_min_move_percentage(self): return basic.round4(self.min_move_percentage)
+    def get_current_profit_percentage(self): return basic.round4(self.current_profit_percentage)
+    def get_current_profit(self): return basic.round4(self.current_profit)
+    def get_retreat(self): return basic.round4(self.retreat)
     def get_total_quantity(self): return self.total_quantity
     def get_remaining_quantity(self): return self.total_quantity - self.filled_quantity

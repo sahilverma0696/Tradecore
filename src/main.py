@@ -17,7 +17,6 @@ from src.core.order_manager import OrderManager
 
 # Strategy components
 from src.strategies.vwap_strategy import VwapStrategy
-from src.strategies.exit_manager import ExitManager
 
 # Factory imports for dynamic component creation
 from src.core.executors.executor_factory import ExecutorFactory
