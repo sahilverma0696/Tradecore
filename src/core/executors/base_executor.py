@@ -4,58 +4,52 @@ from typing import Dict, Any, Optional
 import time
 from src.logger_factory import get_logger
 from src.config_manager import ConfigManager
+from src.core.event_bus.mixins import Publisher, Subscriber
+from src.core.event_bus.events import OrderEvent
 
 
-class BaseExecutor(ABC):
+
+
+class BaseExecutor(ABC,Publisher, Subscriber):
     """Base class for all order execution implementations."""
     
     def __init__(self, client=None, paper_trade=True, logger=None, config: Dict[str, Any] = None):
+        super().__init__()
         self.client = client
         self.paper_trade = paper_trade
-        self.logger = logger or get_logger(f"{self.__class__.__name__}")
-        self.config = config or {}
+        self.logger = get_logger(f"{self.__class__.__name__}")
+        self.config = config
         
         # Common configuration
-        self.max_retries = self.config.get('max_retries', 3)
-        self.retry_delay = self.config.get('retry_delay', 1)
-        self.default_quantity = self.config.get('default_quantity', 75)
+        self.max_retries = self.config.get('max_retries')
+        self.retry_delay = self.config.get('retry_delay')
+        self.default_quantity = self.config.get('default_quantity')
         
         # Track trades
         self.open_trades = {}
         self.closed_trades = []
         self.total_executed_orders = 0
         
+        # subscribe to events 
+        self.subscribe_to_event(OrderEvent, self._on_order_event)
         self.logger.info(f"{self.__class__.__name__} initialized - Paper Trade: {self.paper_trade}")
+    
+    @abstractmethod
+    def _on_order_event(self,event: OrderEvent):
+        pass
     
     @abstractmethod
     def _place_order_impl(self, symbol: str, side: str, quantity: int, order_type: str = "MARKET") -> Dict[str, Any]:
         """Implementation-specific order placement logic."""
         pass
     
-    @abstractmethod
-    def _get_order_status_impl(self, order_id: str) -> Dict[str, Any]:
-        """Implementation-specific order status check."""
-        pass
     
-    @abstractmethod
-    def _cancel_order_impl(self, order_id: str) -> bool:
-        """Implementation-specific order cancellation."""
-        pass
     
     @abstractmethod
     def _normalize_symbol(self, symbol: str) -> str:
         """Normalize symbol format for the specific broker."""
         pass
     
-    @abstractmethod
-    def _validate_connection(self) -> bool:
-        """Validate connection to broker."""
-        pass
-    
-    def get_quantity(self, symbol: str) -> int:
-        """Get quantity for a symbol from config."""
-        quantities = self.config.get('quantities', {})
-        return quantities.get(symbol, self.default_quantity)
     
     def execute_order(self, symbol: str, direction: str, timestamp: datetime = None) -> bool:
         """Main order execution method - template pattern."""

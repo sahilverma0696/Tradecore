@@ -41,9 +41,9 @@ def load_configurations():
         system_config = SystemConfigManager()
         trading_config = ConfigManager()
         
-        logger.info(f"System mode: {system_config.get('system.mode', 'offline')}")
-        logger.info(f"Streamer type: {system_config.get('streamer.type', 'offline')}")
-        logger.info(f"Executor type: {system_config.get('executor.type', 'mock')}")
+        logger.info(f"System mode: {system_config.get('system.mode')}")
+        logger.info(f"Streamer type: {system_config.get('streamer.type')}")
+        logger.info(f"Executor type: {system_config.get('executor.type')}")
         
         logger.info("✅ Configurations loaded successfully")
         return system_config, trading_config
@@ -97,26 +97,22 @@ def create_and_register_components(system_config, trading_config):
         logger.info("Creating core components...")
         
         # CandleMaker - subscribes to quotes, publishes candles
-        logger.info("   📊 Creating CandleMaker...")
         components['candle_maker'] = CandleMaker()
-        logger.info("   ✅ CandleMaker registered for quote → candle conversion")
         
         # OrderManager - subscribes to signals, manages orders (now with integrated exit logic)
-        logger.info("   📋 Creating OrderManager...")
+        # logger.info("   📋 Creating OrderManager...")
         components['order_manager'] = OrderManager()
-        logger.info("   ✅ OrderManager registered for order lifecycle management with integrated exits")
+        # logger.info("   ✅ OrderManager registered for order lifecycle management with integrated exits")
         
         # Create strategy components
         logger.info("Creating strategy components...")
         config = trading_config.get()
         
         # VwapStrategy - subscribes to candles, publishes entry signals
-        logger.info("   💡 Creating VwapStrategy...")
+        # logger.info("   💡 Creating VwapStrategy...")
         components['vwap_strategy'] = VwapStrategy(config=config)
-        logger.info("   ✅ VwapStrategy registered for candle → signal generation")
+        # logger.info("   ✅ VwapStrategy registered for candle → signal generation")
         
-        # Note: ExitManager is no longer needed as exit logic is integrated into OrderObject
-        logger.info("   ✅ Exit logic integrated into OrderObject (no separate ExitManager needed)")
         
         # Create executor using factory
         logger.info("Creating executor...")
@@ -129,7 +125,6 @@ def create_and_register_components(system_config, trading_config):
             broker=exec_type,
             config=config_data
         )
-        logger.info(f"   ✅ {exec_type} executor created for order execution")
         
         # Create streamer using factory
         logger.info("Creating market data streamer...")
@@ -166,25 +161,25 @@ def create_and_register_components(system_config, trading_config):
         logger.error(f"❌ Failed to create components: {e}")
         raise
 
-def wire_component_dependencies(components):
-    """Wire direct dependencies between components (non-event based)."""
-    logger.info("🔗 Wiring component dependencies...")
+# def wire_component_dependencies(components):
+#     """Wire direct dependencies between components (non-event based)."""
+#     logger.info("🔗 Wiring component dependencies...")
     
-    try:
-        # Only wire OrderManager and Executor now
-        # ExitManager is no longer needed as exit logic is in OrderObject
-        order_manager = components['order_manager']
-        executor = components['executor']
+#     try:
+#         # Only wire OrderManager and Executor now
+#         # ExitManager is no longer needed as exit logic is in OrderObject
+#         order_manager = components['order_manager']
+#         executor = components['executor']
         
-        # Wire executor to order manager
-        logger.info("   🔗 Connecting Executor → OrderManager")
-        order_manager.register_handler(executor.execute_order)
+#         # Wire executor to order manager
+#         logger.info("   🔗 Connecting Executor → OrderManager")
+#         order_manager.register_handler(executor.execute_order)
         
-        logger.info("✅ Component dependencies wired successfully")
+#         logger.info("✅ Component dependencies wired successfully")
         
-    except Exception as e:
-        logger.error(f"❌ Failed to wire components: {e}")
-        raise
+#     except Exception as e:
+#         logger.error(f"❌ Failed to wire components: {e}")
+#         raise
 
 def start_system_components(components, system_config):
     """Start all system components in proper order."""
@@ -303,8 +298,8 @@ def main():
         # PHASE 3: Create and register all components with event bus
         components = create_and_register_components(system_config, trading_config)
         
-        # PHASE 4: Wire direct dependencies (non-event based)
-        wire_component_dependencies(components)
+        # # PHASE 4: Wire direct dependencies (non-event based)
+        # wire_component_dependencies(components)
         
         # PHASE 5: Start all system components
         streaming_future = start_system_components(components, system_config)

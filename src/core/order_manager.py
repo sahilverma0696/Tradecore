@@ -44,11 +44,11 @@ class OrderManager(Subscriber, Publisher):
         self.subscribe_to_event(CandleGenerated, self._handle_update_candle)
         self._logger.info(f"✅ OrderManager subscribed to EntrySignal and ExitSignal events")
       
-    # this way is not in use  
-    def register_handler(self, cb):
-        if callable(cb):
-            self._logger.debug(f"Registering handler {cb.__name__}")
-            self._handlers.append(cb)
+    # # this way is not in use  
+    # def register_handler(self, cb):
+    #     if callable(cb):
+    #         self._logger.debug(f"Registering handler {cb.__name__}")
+    #         self._handlers.append(cb)
     
     
     def _handle_entry_signal(self, event: EntrySignal):
@@ -90,7 +90,7 @@ class OrderManager(Subscriber, Publisher):
         self._order_logger.log_entry(order)
         
         # Update live order IPC file
-        if order.state == "ACTIVE":
+        if order.state == "OPEN":
             self._write_live_order_data()
         
 
@@ -106,16 +106,16 @@ class OrderManager(Subscriber, Publisher):
     def _execute_order(self, order: OrderObject,type:str):
         
         
-        direction = order.get_side()
+        side = order.get_side()
         if type == 'EXIT':
             '''
             This only sends exit signal for change in direction signal, honestly should not be executed since 
             Stop loss should be able to stop it, if there is an event fired from this, it is a problem
             '''
             if order.get_side() == "BUY":
-                direction = "SELL"
+                side = "SELL"
             else:
-                direction = "BUY"
+                side = "BUY"
             order.state = "CLOSE"
             
 
@@ -123,12 +123,13 @@ class OrderManager(Subscriber, Publisher):
             timestamp=order._timestamp,
             order_id=order.id,
             instrument=order.get_instrument(),
-            direction=direction,
+            side=side,
             price=order.ltp,
             strategy="VWAP",
             type=type,
             candle= order.current_candle,
-            meta_info='placeholder for now'
+            meta_info='placeholder for now',
+            source="OrderManager->execute_order"
         )
         # execute the side as it is 
         self.publish_event(orderEvent)
@@ -155,7 +156,8 @@ class OrderManager(Subscriber, Publisher):
             order.set_ltp(event.ltp, event.timestamp)
 
             # Update live order IPC file when LTP changes
-            if order.state == "ACTIVE":
+            if order.state == "OPEN":
+                
                 self._write_live_order_data()
 
 

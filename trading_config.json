@@ -3,7 +3,7 @@
   "api_secret": "_",
   "symbols": ["btcusdt"],
   "name_symbol": "btcusdt",
-  "paper_trade": true,
+  "paper_trade": false,
   "broker": "zerodha",
   "execution": {
     "delta_sell": 0.02,

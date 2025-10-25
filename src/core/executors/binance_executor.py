@@ -1,9 +1,11 @@
 from typing import Dict, Any
 from datetime import datetime
 from .base_executor import BaseExecutor
+from src.core.event_bus.events import OrderEvent
 
 
-class BinanceExecutor(BaseExecutor):
+
+class BinanceExecutor(BaseExecutor,):
     """Binance-specific order executor."""
     
     def __init__(self, client=None, paper_trade=True, logger=None, config: Dict[str, Any] = None):
@@ -14,6 +16,9 @@ class BinanceExecutor(BaseExecutor):
         self.time_in_force = self.config.get('time_in_force', 'GTC')  # Good Till Cancelled
         
         self.logger.info(f"BinanceExecutor initialized - Test Mode: {self.test_mode}")
+    
+    def _on_order_event(self, event: OrderEvent):
+        self.logger.info(event)
     
     def _place_order_impl(self, symbol: str, side: str, quantity: int, order_type: str = "MARKET") -> Dict[str, Any]:
         """Place order using Binance API."""
@@ -119,41 +124,4 @@ class BinanceExecutor(BaseExecutor):
             return self.open_trades[order_id]['symbol']
         return None
     
-    def get_account_balance(self) -> Dict[str, float]:
-        """Get account balance from Binance."""
-        if not self.client or self.paper_trade:
-            return {}
-        
-        try:
-            account = self.client.get_account()
-            balances = {}
-            
-            for balance in account.get('balances', []):
-                asset = balance['asset']
-                free = float(balance['free'])
-                locked = float(balance['locked'])
-                
-                if free > 0 or locked > 0:
-                    balances[asset] = {
-                        'free': free,
-                        'locked': locked,
-                        'total': free + locked
-                    }
-            
-            return balances
-        except Exception as e:
-            self.logger.error(f"Error fetching Binance balance: {e}")
-            return {}
     
-    def get_24hr_ticker(self, symbol: str) -> Dict[str, Any]:
-        """Get 24hr ticker statistics from Binance."""
-        if not self.client:
-            return {}
-        
-        try:
-            normalized_symbol = self._normalize_symbol(symbol)
-            ticker = self.client.get_ticker(symbol=normalized_symbol)
-            return ticker
-        except Exception as e:
-            self.logger.error(f"Error fetching Binance ticker for {symbol}: {e}")
-            return {}

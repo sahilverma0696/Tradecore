@@ -51,7 +51,7 @@
     }
   },
   "executor": {
-    "type": "mock",
+    "type": "binance",
     "config": {
       "mock": {
         "slippage_factor": 0.0001,

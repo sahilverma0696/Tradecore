@@ -9,20 +9,22 @@ import inspect
 class Event(ABC):
     """Base event class for all events in the system."""
     timestamp: datetime
-    source: str = field(default_factory=lambda: Event._get_caller_name())
+    source: str 
+    # failong cause arguments follows
+    # = field(default_factory=lambda: Event._get_caller_name())
     
-    @staticmethod
-    def _get_caller_name() -> str:
-        """Returns the name of the function or method that created this event."""
-        stack = inspect.stack()
-        # stack[0] is _get_caller_name
-        # stack[1] is the lambda (default_factory)
-        # stack[2] is the constructor (__init__) of the dataclass
-        # stack[3] is the function that actually instantiated the object
-        if len(stack) > 3:
-            frame = stack[3]
-            return frame.function
-        return "unknown"
+    # @staticmethod
+    # def _get_caller_name() -> str:
+    #     """Returns the name of the function or method that created this event."""
+    #     stack = inspect.stack()
+    #     # stack[0] is _get_caller_name
+    #     # stack[1] is the lambda (default_factory)
+    #     # stack[2] is the constructor (__init__) of the dataclass
+    #     # stack[3] is the function that actually instantiated the object
+    #     if len(stack) > 3:
+    #         frame = stack[3]
+    #         return frame.function
+    #     return "unknown"
     
     def __post_init__(self):
         if not self.timestamp:
@@ -32,7 +34,7 @@ class Event(ABC):
 @dataclass
 class QuoteEvent(Event):
     """Simplified quote event for basic market data."""
-    instrument: str  # Can be string or number based on exchange
+    instrument: str  
     name: str       # Symbol name
     ltp: float      # Last Traded Price
     ltq: float      # Last Traded Quantity
@@ -81,7 +83,7 @@ class OrderEvent(Event):
     strategy: str
     type: str # ENTRY OR EXIT
     candle: CandleGenerated = None
-    meta_info: str
+    meta_info: str = ""
     
 # not in use, if used to be updated with OrderEvent
 @dataclass

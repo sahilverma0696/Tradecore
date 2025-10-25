@@ -3,7 +3,6 @@ Order execution module containing all executor implementations.
 """
 
 from .base_executor import BaseExecutor
-from .mock_executor import MockExecutor
 from .executor_factory import ExecutorFactory
 
 # Import broker-specific executors if they exist
@@ -24,7 +23,6 @@ except ImportError:
 
 __all__ = [
     'BaseExecutor',
-    'MockExecutor', 
     'ExecutorFactory'
 ]
 

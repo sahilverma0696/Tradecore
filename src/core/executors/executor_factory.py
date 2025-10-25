@@ -1,6 +1,5 @@
 from typing import Dict, Any, Optional
 from .base_executor import BaseExecutor
-from .mock_executor import MockExecutor
 from src.logger_factory import get_logger
 
 # Import broker executors with fallback handling
@@ -23,9 +22,7 @@ except ImportError:
 class ExecutorFactory:
     """Factory for creating executor instances based on broker type."""
     
-    EXECUTOR_CLASSES = {
-        'mock': MockExecutor,
-    }
+    EXECUTOR_CLASSES = {}
     
     # Add broker executors if available
     if ZerodhaExecutor:
@@ -70,15 +67,13 @@ class ExecutorFactory:
         logger.info(f"Creating {broker} executor - Paper Trade: {paper_trade}")
         
         # Handle MockExecutor which doesn't need client parameter
-        if broker == 'mock':
-            return executor_class(config=config or {})
-        else:
-            return executor_class(
-                client=client,
-                paper_trade=paper_trade,
-                logger=logger,
-                config=config or {}
-            )
+        
+        return executor_class(
+            client=client,
+            paper_trade=paper_trade,
+            logger=logger,
+            config=config or {}
+        )
     
     @classmethod
     def get_supported_brokers(cls) -> list:
