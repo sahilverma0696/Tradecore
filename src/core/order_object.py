@@ -43,8 +43,9 @@ class OrderObject(Publisher):
         self.zero_stop = 0  # to set as the entry price based on side, after 1 minute of entry
         self.zero_stop_state = False
         
+        #TODO: read from trading config, very important 
         # this is loss stop, in case of direction switch, although at zero_stop should change the side of order so this should not be triggered, if this is triggered there is gap in system
-        self.loss_stop = self.const_entry_price * (0.98 if side == "BUY" else 1.02)
+        self.loss_stop = self.const_entry_price * (0.9998 if side == "BUY" else 1.0002)
 
         
         # net zero stop, to be set such that no loss happens

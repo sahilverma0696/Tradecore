@@ -10,7 +10,7 @@ class ExitManager(Publisher):
     """Takes OrderObject and provides exit signals"""
     def __init__(self, 
                  exit_steps=None,
-                 reterival_exit: float = 0.05,
+                 reterival_exit: float = 0.001,
                  default_quantity: int = 75,
                  market_close: str = None):
         super().__init__()

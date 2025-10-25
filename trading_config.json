@@ -36,7 +36,7 @@
     }
   },
   "quantity": "100",
-  "reterival_exit": 0.1,
+  "reterival_exit": 0.0001,
   "market_close_time": "13:39",
   "default_quantity": 75,
   "buy_quantity": 225,
