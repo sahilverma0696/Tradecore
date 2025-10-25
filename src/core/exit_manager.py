@@ -117,7 +117,7 @@ class ExitManager(Publisher):
         ltp = order.get_ltp()
         entry_price = order.get_entry_price()
         # this is in case of ltp is below 2% of entry price in BUY and above 2% in SELL
-        threshold = 0.02 * entry_price  # 2% of entry price
+        threshold = 0.0002 * entry_price  # 2% of entry price
         side = order.get_side()
         if (side == "BUY" and ltp <= entry_price - threshold) or (side == "SELL" and ltp >= entry_price + threshold):
             return self._create_exit_info(order, 'HARD_STOP', order.quantity,'FULL')
