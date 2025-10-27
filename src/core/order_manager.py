@@ -225,6 +225,7 @@ class OrderManager(Subscriber, Publisher):
                     "current_ltp": order.ltp,
                     "current_profit_percentage": order.get_current_profit_percentage(),
                     "current_profit": order.get_current_profit(),
+                    "trail": order.trigger,
                     "retreat": order.get_retreat(),
                     "max_move_percentage": order.get_max_move_percentage(),
                     "min_move_percentage": order.get_min_move_percentage(),

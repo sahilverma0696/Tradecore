@@ -1,6 +1,6 @@
 from datetime import datetime
 from typing import Optional, Dict, Any, TYPE_CHECKING
-from src.core.event_bus.events import ExitSignal
+from src.core.event_bus.events import OrderEvent
 from src.core.event_bus.mixins import Publisher
 from src.logger_factory import get_logger
 from src.time_control import TimeChecker
@@ -31,7 +31,7 @@ class ExitManager(Publisher):
         self.time = TimeChecker()
         
         
-    # step based exits
+    # step based exits, to be updated
     def _check_step_exit(self, order: 'OrderObject') -> Optional[Dict[str, Any]]:
         """
         Check if step change triggers partial profit exit.
@@ -67,37 +67,42 @@ class ExitManager(Publisher):
 
 
     # trigger based exits
-    #TODO: set the quantity, it's a single quantity to be returned
     def _check_retrieval_trigger_exit(self, order: 'OrderObject') -> Optional[Dict[str, Any]]:
         '''
         Check if retrieval trigger exit is triggered.
         THIS IS SAVING PROFIT EXIT
         '''
+        print("yeah ?")
         trigger = order.get_current_trigger() *100 # convert to percentage
         side = order.get_side()
         ltp = order.get_ltp()
         max_price = order.get_max_price()
         min_price = order.get_min_price()
-        difference = (max_price - ltp) if side == "BUY" else (ltp - min_price)
+        difference = abs((max_price - ltp) if side == "BUY" else (ltp - min_price))
         difference_percentage = (difference / max_price)*100 if side == "BUY" else (difference / min_price)*100
+        print("difference_pct", difference_percentage)
+        print("trigger", trigger)
         
-        if( difference_percentage >= trigger and trigger > 0):
-            remaining_quantity = order.get_remaining_quantity()
-            order.total_quantity = 0  # Set total quantity to 0 to indicate full exit
+        if( difference_percentage >= trigger):
             order.state = "CLOSED"
-            return self._create_exit_info(order, 'RETRIEVAL_TRIGGER', remaining_quantity, 'FULL')
+            return self._create_exit_info(order, 'RETRIEVAL_TRIGGER', order.quantity, 'FULL')
         return None
 
+    # Net ZERO STOP
     def _check_net_zero_stop_exit(self,order: 'OrderObject') -> Optional[Dict[str,Any]]:
         '''
         THIS IS A NET ZERO EXIT 
         this is step after sometime, this becomes a net 0 profit
         considers transaction and taxes charges taking trade to no loss
         '''
+        
+        # assuming 1% above 
         if abs(order.ltp - order.net_zero_stop) <= 1 and order.net_zero_state:
-            return True
+            order.state = "CLOSE"
+            return self._create_exit_info(order, 'ZERO_STOP', order.quantity,'FULL')
         return False
     
+    # ZERO STOP
     def _check_zero_stop_exit(self, order: 'OrderObject') -> Optional[Dict[str, Any]]:
         '''
         Check if zero stop exit is triggered.
@@ -107,9 +112,11 @@ class ExitManager(Publisher):
         # this is around entry price, say within 0.1% of entry price
         threshold = self.dust_value * order.const_entry_price  # 0.01 of entry price
         if abs(ltp - order.const_entry_price) <= threshold and order.zero_stop_state:
+            order.state = "CLOSE"
             return self._create_exit_info(order, 'ZERO_STOP', order.quantity,'FULL')
         return None
 
+    # LOSS STOP
     def _check_loss_stop_exit(self, order: 'OrderObject') -> Optional[Dict[str, Any]]:
         '''
         Check if hard stop exit is triggered.
@@ -119,7 +126,8 @@ class ExitManager(Publisher):
         loss_stop = order.loss_stop
     
         if basic.tolerance(ltp,loss_stop):
-            print("LOSS STOP HIT")
+            # print("LOSS STOP HIT")
+            order.state = "CLOSE"
             return self._create_exit_info(order, 'LOSS_STOP', order.quantity,'FULL')
         return None
     
@@ -128,6 +136,7 @@ class ExitManager(Publisher):
         #TODO: read from config the market close time 
         market_close_time = '13:37'
         if self.time.is_same_time(market_close_time):
+            order.state = "CLOSE"
             return self._create_exit_info(order,'MARKET CLOSE',order.quantity,'FULL')
         return False
 
@@ -157,6 +166,7 @@ class ExitManager(Publisher):
         if net_zero is not None:
             return net_zero
         
+        print("HELLO ?")
         retrieval_trigger = self._check_retrieval_trigger_exit(order)
         if retrieval_trigger is not None:
             return retrieval_trigger
@@ -191,17 +201,18 @@ class ExitManager(Publisher):
             # Send exit signal with opposite side
             print('exit trigger true', trigger)
             opposite_side = "SELL" if order.const_side == "BUY" else "BUY"
-            exitEvent = ExitSignal(
-                symbol=order.const_name,
-                direction=opposite_side,
+            exitEvent = OrderEvent(
+                order_id=order.id,
+                instrument=order.const_instrument,
+                side=opposite_side,
                 price=order.ltp,
-                quantity=order.quantity,
-                exit_type='FULL',
-                reason='trigger',
-                timestamp=order._timestamp,
-                source='Exit manager'
+                strategy='VWAP',
+                type='FULL',
+                candle=order.current_candle,
+                meta_info="SENT FROM EXIT MGR"
             )
             
+            print("Publishing")
             self.publish_event(exitEvent)
             return True
             
