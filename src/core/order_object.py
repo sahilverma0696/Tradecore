@@ -46,7 +46,7 @@ class OrderObject(Publisher):
         
         #TODO: read from trading config, very important 
         # this is loss stop, in case of direction switch, although at zero_stop should change the side of order so this should not be triggered, if this is triggered there is gap in system
-        self.loss_stop = basic.round4(self.const_entry_price * (0.9998 if side == "BUY" else 1.0002))
+        self.loss_stop = basic.round4(self.const_entry_price * (0.98 if side == "BUY" else 1.02))
 
         
         # net zero stop, to be set such that no loss happens

@@ -29,6 +29,7 @@ class ExitManager(Publisher):
         self.logger = get_logger(name)
         self.dust_value = 0.01
         self.time = TimeChecker()
+        self.count = 0
         
         
     # step based exits, to be updated
@@ -66,27 +67,45 @@ class ExitManager(Publisher):
         return None
 
 
-    # trigger based exits
     def _check_retrieval_trigger_exit(self, order: 'OrderObject') -> Optional[Dict[str, Any]]:
         '''
         Check if retrieval trigger exit is triggered.
         THIS IS SAVING PROFIT EXIT
+        
+        Trigger only on opposite direction:
+            - BUY → trigger on fall
+            - SELL → trigger on rise
         '''
-        print("yeah ?")
-        trigger = order.get_current_trigger() *100 # convert to percentage
+        trigger = order.get_current_trigger() * 100  # convert to percentage
         side = order.get_side()
         ltp = order.get_ltp()
         max_price = order.get_max_price()
         min_price = order.get_min_price()
-        difference = abs((max_price - ltp) if side == "BUY" else (ltp - min_price))
-        difference_percentage = (difference / max_price)*100 if side == "BUY" else (difference / min_price)*100
-        print("difference_pct", difference_percentage)
-        print("trigger", trigger)
-        
-        if( difference_percentage >= trigger):
+    
+        # Calculate percentage difference from the extreme point (max/min)
+        if side == "BUY":
+            # fall from the top (max price)
+            difference = max_price - ltp
+            difference_percentage = basic.round4((difference / max_price) * 100)
+            is_opposite_move = ltp < max_price  # falling
+        else:  # SELL
+            # rise from the bottom (min price)
+            difference = ltp - min_price
+            difference_percentage = basic.round4((difference / min_price) * 100)
+            is_opposite_move = ltp > min_price  # rising
+    
+        # Debug info (optional)
+        print(f"[{side}] ltp={ltp}, max={max_price}, min={min_price}, diff%={difference_percentage},opp_side={is_opposite_move} trigger={trigger}")
+    
+        # Trigger only if moving opposite to entry direction and threshold met
+        if is_opposite_move and difference_percentage >= trigger:
+            self.count += 1
+            print(f"Triggered retrieval exit #{self.count} ({side})")
             order.state = "CLOSED"
             return self._create_exit_info(order, 'RETRIEVAL_TRIGGER', order.quantity, 'FULL')
+    
         return None
+
 
     # Net ZERO STOP
     def _check_net_zero_stop_exit(self,order: 'OrderObject') -> Optional[Dict[str,Any]]:
@@ -100,7 +119,7 @@ class ExitManager(Publisher):
         if abs(order.ltp - order.net_zero_stop) <= 1 and order.net_zero_state:
             order.state = "CLOSE"
             return self._create_exit_info(order, 'ZERO_STOP', order.quantity,'FULL')
-        return False
+        return None
     
     # ZERO STOP
     def _check_zero_stop_exit(self, order: 'OrderObject') -> Optional[Dict[str, Any]]:
@@ -138,7 +157,7 @@ class ExitManager(Publisher):
         if self.time.is_same_time(market_close_time):
             order.state = "CLOSE"
             return self._create_exit_info(order,'MARKET CLOSE',order.quantity,'FULL')
-        return False
+        return None
 
     def _check_on_trigger_exit(self, order: 'OrderObject') -> Optional[Dict[str, Any]]:
         
@@ -156,23 +175,28 @@ class ExitManager(Publisher):
         #     return step_exit
         loss_stop = self._check_loss_stop_exit(order)
         if loss_stop is not None:
+            # print("L",loss_stop)
             return loss_stop
         
         zero_stop = self._check_zero_stop_exit(order)
         if zero_stop is not None:
+            # print("Z",zero_stop)
             return zero_stop
         
         net_zero = self._check_net_zero_stop_exit(order)
         if net_zero is not None:
+            # print("N",net_zero)
             return net_zero
         
-        print("HELLO ?")
+        # print("HELLO ?")
         retrieval_trigger = self._check_retrieval_trigger_exit(order)
         if retrieval_trigger is not None:
+            # print("R",retrieval_trigger)
             return retrieval_trigger
         
         market_close = self._check_market_close_exit(order)
         if market_close is not None:
+            # print("M",market_close)
             return market_close
         return None
 

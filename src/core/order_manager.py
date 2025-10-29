@@ -19,6 +19,15 @@ class OrderManager(Subscriber, Publisher):
         
         # the main dict of all orders
         # TODO: able to move the closed orders to archive, logging benefit
+        # this is needed to be unique
+        
+        
+        
+        
+        
+        
+        
+        
         self._orders: Dict[str, OrderObject] = {}   # symbol -> OrderObject
         self._logger = get_logger("OrderManager")
         self._order_logger = OrderLogger(log_dir)
@@ -59,6 +68,26 @@ class OrderManager(Subscriber, Publisher):
 
         # Check if order already exists
         existing_order = self._orders.get(symbol)
+        #TODO: ONLY IF ORDER IS ACTIVE
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
         if existing_order:
             if existing_order.get_side() != side:
                 # Closing order in opposite direction
@@ -152,13 +181,11 @@ class OrderManager(Subscriber, Publisher):
         """Update LTP and check for exits"""
         if event.instrument in self._orders:
             order = self._orders[event.instrument]
-            
-            # OrderObject now handles exit logic internally
-            order.set_ltp(event.ltp, event.timestamp)
-
-            # Update live order IPC file when LTP changes
             if order.state == "OPEN":
-                
+                # OrderObject now handles exit logic internally
+                order.set_ltp(event.ltp, event.timestamp)
+
+                # Update live order IPC file when LTP changes    
                 self._write_live_order_data()
 
 
@@ -225,7 +252,7 @@ class OrderManager(Subscriber, Publisher):
                     "current_ltp": order.ltp,
                     "current_profit_percentage": order.get_current_profit_percentage(),
                     "current_profit": order.get_current_profit(),
-                    "trail": order.trigger,
+                    "trigger": order.trigger,
                     "retreat": order.get_retreat(),
                     "max_move_percentage": order.get_max_move_percentage(),
                     "min_move_percentage": order.get_min_move_percentage(),

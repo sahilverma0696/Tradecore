@@ -1,0 +1,2 @@
+OrderManager-> order dict, should hold the order state, since this is a single instrument system
+clear out the values or % in retreat, loss stop net stop etc, read from config
