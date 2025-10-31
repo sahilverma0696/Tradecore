@@ -6,6 +6,7 @@ from src.core.exit_manager import ExitManager
 from typing import Optional, Dict, Any
 import time
 import src.basic as basic
+from src.global_enum import *
 
 class OrderObject(Publisher):
     '''
@@ -24,7 +25,7 @@ class OrderObject(Publisher):
         self.id = int(time.time()) # unique id for each order, helps in ignoring redundant signals
         self.const_name = name
         self.const_instrument = instrument
-        self.state = "OPEN"
+        self.state = ORDERSTATE.OPEN
         self.const_side = side.upper()  # 'BUY' or 'SELL'
         
 
@@ -46,7 +47,9 @@ class OrderObject(Publisher):
         
         #TODO: read from trading config, very important 
         # this is loss stop, in case of direction switch, although at zero_stop should change the side of order so this should not be triggered, if this is triggered there is gap in system
-        self.loss_stop = basic.round4(self.const_entry_price * (0.98 if side == "BUY" else 1.02))
+        self.loss_stop_low = float(self._trading_config.get('loss_stop_low'))
+        self.loss_stop_high = float(self._trading_config.get('loss_stop_high'))
+        self.loss_stop = basic.round4(self.const_entry_price * (self.loss_stop_low if side == "BUY" else self.loss_stop_high))
 
         
         # net zero stop, to be set such that no loss happens
@@ -111,7 +114,7 @@ class OrderObject(Publisher):
         # Check for exit conditions using exit manager
         exit_info = self.exit_manager.check(self)
         if exit_info:
-            self.state = "CLOSED"
+            self.state = ORDERSTATE.CLOSE
 
         else:
             self._update_min_max_price(ltp)

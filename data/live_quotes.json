@@ -1,9 +1,9 @@
 {
-  "SOLUSDT": {
-    "symbol": "SOLUSDT",
-    "ltp": 196.26,
-    "ltq": 2.548,
-    "timestamp": "2025-10-29T22:20:21.103000",
+  "BTCUSDT": {
+    "symbol": "BTCUSDT",
+    "ltp": 109423.99,
+    "ltq": 0.00036,
+    "timestamp": "2025-10-31T18:10:24.635000",
     "source": "BinanceStreamer"
   }
 }

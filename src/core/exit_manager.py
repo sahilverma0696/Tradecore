@@ -76,7 +76,7 @@ class ExitManager(Publisher):
             - BUY → trigger on fall
             - SELL → trigger on rise
         '''
-        trigger = order.get_current_trigger() * 100  # convert to percentage
+        trigger = order.get_current_trigger() * 100
         side = order.get_side()
         ltp = order.get_ltp()
         max_price = order.get_max_price()

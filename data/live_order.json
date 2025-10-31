@@ -1,29 +1,26 @@
 {
-  "timestamp": "2025-10-29T22:20:21.246150",
+  "timestamp": "2025-10-31T17:05:08.133612",
   "total_orders": 1,
   "orders": [
     {
-      "id": 1761775801,
-      "symbol": "SOLUSDT",
-      "instrument": "SOLUSDT",
+      "id": 1761930300,
+      "symbol": "BTCUSDT",
+      "instrument": "BTCUSDT",
       "side": "BUY",
       "total_quantity": "100",
-      "entry_price": 195.98,
+      "entry_price": 109040.88,
       "net_stop": 0,
       "zero_stop": 0,
-      "loss_stop": 192.0604,
-      "current_ltp": 196.26,
-      "current_profit_percentage": 0.1429,
-      "current_profit": 0.28,
-      "trigger": 0.02,
-      "retreat": 0.051,
-      "max_move_percentage": 0.1939,
-      "min_move_percentage": -0.1378,
-      "entry_time": "2025-10-29T22:09:00",
-      "last_update": "2025-10-29T22:20:21.246141",
-      "status": "OPEN",
-      "exit_steps": [],
-      "trail_steps": []
+      "loss_stop": 106860.0624,
+      "current_ltp": 109075.02,
+      "current_profit_percentage": 0.0313,
+      "current_profit": 34.14,
+      "trigger": 0.0002,
+      "retreat": 0.02,
+      "max_move_percentage": 0.0513,
+      "min_move_percentage": 0.0,
+      "entry_time": "2025-10-31T17:04:00",
+      "last_update": "2025-10-31T17:05:08.133610"
     }
   ]
 }

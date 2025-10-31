@@ -10,6 +10,7 @@ from src.core.order_logger import OrderLogger
 from src.config_manager import ConfigManager
 from src.core.thread_manager import ThreadManager, ThreadPoolType
 import src.basic as basic
+from src.global_enum import *
 
 class OrderManager(Subscriber, Publisher):
     """Manages order lifecycle and execution."""
@@ -21,14 +22,7 @@ class OrderManager(Subscriber, Publisher):
         # TODO: able to move the closed orders to archive, logging benefit
         # this is needed to be unique
         
-        
-        
-        
-        
-        
-        
-        
-        self._orders: Dict[str, OrderObject] = {}   # symbol -> OrderObject
+        self._orders: Dict[str, OrderObject] = {}   # symbol -> OrderObject, unique by ID, State
         self._logger = get_logger("OrderManager")
         self._order_logger = OrderLogger(log_dir)
         self._handlers = []  # callback for order execution
@@ -68,27 +62,8 @@ class OrderManager(Subscriber, Publisher):
 
         # Check if order already exists
         existing_order = self._orders.get(symbol)
-        #TODO: ONLY IF ORDER IS ACTIVE
         
-        
-        
-        
-        
-        
-        
-        
-        
-        
-        
-        
-        
-        
-        
-        
-        
-        
-        
-        if existing_order:
+        if existing_order and  existing_order.state == ORDERSTATE.OPEN:
             if existing_order.get_side() != side:
                 # Closing order in opposite direction
                 # EXIT CASE 1 : Direction switch, profit negative
@@ -120,7 +95,7 @@ class OrderManager(Subscriber, Publisher):
         self._order_logger.log_entry(order)
         
         # Update live order IPC file
-        if order.state == "OPEN":
+        if order.state == ORDERSTATE.OPEN:
             self._write_live_order_data()
         
 
@@ -146,7 +121,7 @@ class OrderManager(Subscriber, Publisher):
                 side = "SELL"
             else:
                 side = "BUY"
-            order.state = "CLOSE"
+            order.state = ORDERSTATE.CLOSE
             
 
         orderEvent = OrderEvent(
@@ -170,23 +145,26 @@ class OrderManager(Subscriber, Publisher):
     def _handle_update_candle(self, event: CandleGenerated):
         """Handle candle update events."""
         if event.symbol in self._orders:
-            self.update_candle(event.symbol, event)
+            order = self._orders[event.symbol]
+            if order and  order.state == ORDERSTATE.OPEN:
+                self.update_candle(event.symbol, event)
 
     def _on_ltp_update(self, event: QuoteEvent):
         """Handle LTP update events."""
         if event.instrument in self._orders:
-            self.update_ltp(event)
+            order = self._orders[event.instrument]
+            if order and order.state == ORDERSTATE.OPEN:
+                self.update_ltp(event)
 
     def update_ltp(self, event: QuoteEvent):
         """Update LTP and check for exits"""
         if event.instrument in self._orders:
             order = self._orders[event.instrument]
-            if order.state == "OPEN":
-                # OrderObject now handles exit logic internally
-                order.set_ltp(event.ltp, event.timestamp)
-
-                # Update live order IPC file when LTP changes    
-                self._write_live_order_data()
+            # OrderObject now handles exit logic internally
+            order.set_ltp(event.ltp, event.timestamp)
+            
+            # Update live order IPC file when LTP changes    
+            self._write_live_order_data()
 
 
     def update_candle(self, symbol: str, candle: CandleGenerated):
@@ -257,10 +235,7 @@ class OrderManager(Subscriber, Publisher):
                     "max_move_percentage": order.get_max_move_percentage(),
                     "min_move_percentage": order.get_min_move_percentage(),
                     "entry_time": order.get_entry_time().isoformat() if order.get_entry_time() else None,
-                    "last_update": datetime.now().isoformat(),
-                    "status": order.state,
-                    "exit_steps": order.step if hasattr(order, 'step') else [],
-                    "trail_steps": order.trail if hasattr(order, 'trail') else []
+                    "last_update": datetime.now().isoformat()
                 }
                 live_orders.append(order_data)
             
