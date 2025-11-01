@@ -96,7 +96,7 @@ class ExitManager(Publisher):
             is_opposite_move = ltp > min_price  # rising
     
         # Debug info (optional)
-        print(f"[{side}] ltp={ltp}, max={max_price}, min={min_price}, diff%={difference_percentage},opp_side={is_opposite_move} trigger={trigger}")
+        # print(f"[{side}] ltp={ltp}, max={max_price}, min={min_price}, diff%={difference_percentage},opp_side={is_opposite_move} trigger={trigger}")
     
         # Trigger only if moving opposite to entry direction and threshold met
         if is_opposite_move and difference_percentage >= trigger:
@@ -243,10 +243,10 @@ class ExitManager(Publisher):
                 strategy='VWAP',
                 type='FULL',
                 candle=order.current_candle,
-                meta_info="SENT FROM EXIT MGR"
+                meta_info= trigger
             )
             
-            print("Publishing")
+            # print("Publishing")
             self.publish_event(exitEvent)
             return True
             

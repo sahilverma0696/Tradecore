@@ -68,7 +68,7 @@ class OrderManager(Subscriber, Publisher):
                 # EXIT CASE 1 : Direction switch, profit negative
                 # this is the only case where an exit signal is generated from entry signal
                 self._logger.info(f"Switching direction for {symbol} from {existing_order.get_side()} to {side}")
-                self._execute_order(existing_order,type ='EXIT')
+                self._execute_order(existing_order,type ='SWITCH')
             else:
                 self._logger.info(f"Duplicate entry signal, same side for {symbol}, ignoring.")
                 return
@@ -126,7 +126,7 @@ class OrderManager(Subscriber, Publisher):
             type=type,
             candle= order.current_candle,
             meta_info='placeholder for now',
-            source="OrderManager->execute_order"
+            source=self.__class__.__name__
         )
         # execute the side as it is 
         self.publish_event(orderEvent)
@@ -232,7 +232,7 @@ class OrderManager(Subscriber, Publisher):
     def _cleanup_closed_orders(self,symbol:str):
         """Remove closed order for given symbol."""
         order = self._orders.get(symbol)
-        if order and order.state == ORDERSTATE.CLOSED:
+        if order and order.state == ORDERSTATE.CLOSE:
             del self._orders[symbol]
             self._logger.info(f"Removed closed order for {symbol} from OrderManager.")
         #TODO: log this order by event bus into order archives

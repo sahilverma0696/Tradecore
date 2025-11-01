@@ -49,13 +49,13 @@ class CandleMaker(Publisher, Subscriber):
         volume = event.ltq or 0
 
         candle_time = timestamp.replace(second=0, microsecond=0)
-        candle_time = candle_time.replace(minute=(candle_time.minute // 1) * 1)
+        candle_time = candle_time.replace(minute=(candle_time.minute // 5) * 5)
 
         current = self._current.get(symbol)
 
         if current is None or current['timestamp'] != candle_time:
             if current:
-                self._logger.debug(f"Finalizing candle for {symbol} at {current['timestamp']}")
+                # self._logger.debug(f"Finalizing candle for {symbol} at {current['timestamp']}")
                 self._finalize(symbol, current)
                 self._logger.debug(f"Creating new candle for {symbol} at {candle_time}")
             current = {
@@ -87,7 +87,7 @@ class CandleMaker(Publisher, Subscriber):
     def _finalize(self, symbol: str, candle: Dict[str, Any]):
         """Finalize and publish a completed candle."""
         try:
-            self._logger.debug(f"Finalizing candle for {symbol}: {candle}")
+            # self._logger.debug(f"Finalizing candle for {symbol}: {candle}")
             
             # Create CandleGenerated event with all required parameters including source
             candle_event = CandleGenerated(

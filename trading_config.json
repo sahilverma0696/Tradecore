@@ -36,7 +36,7 @@
     }
   },
   "quantity": "100",
-  "trail": 0.001,
+  "trail": 0.00045,
   "loss_stop_low": 0.9998,
   "loss_stop_high": 1.0002,
   "market_close_time": "13:39",

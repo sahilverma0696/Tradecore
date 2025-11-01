@@ -83,7 +83,7 @@ class OrderEvent(Event):
     strategy: str
     type: str # ENTRY OR EXIT
     candle: CandleGenerated = None
-    meta_info: str = ""
+    meta_info: Any = None
     
 # not in use, if used to be updated with OrderEvent
 @dataclass

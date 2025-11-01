@@ -44,8 +44,8 @@ class VwapStrategy(Subscriber, Publisher):
             self.logger.warning(f"VWAP missing in candle for {symbol} @ {event.timestamp}")
             return
 
-        if symbol in self.positions:
-            return  # Only generate one entry per symbol
+        # if symbol in self.positions:
+        #     return  # Only generate one entry per symbol
 
         # Entry logic - publish entry signal event
         if open_price < vwap and close_price > vwap:
