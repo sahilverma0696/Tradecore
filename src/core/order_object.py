@@ -1,5 +1,5 @@
 from datetime import datetime
-from src.core.event_bus.events import CandleGenerated, ExitSignal
+from src.core.event_bus.events import CandleGenerated, OrderEvent
 from src.core.event_bus.mixins import Publisher
 from src.logger_factory import get_logger
 from src.core.exit_manager import ExitManager
@@ -15,11 +15,9 @@ class OrderObject(Publisher):
     Updates the data 
     Has inbuild logic for exit management via ExitManager Event based ( stop loss in here )
     '''
-    def __init__(self, name, instrument, trail, side, quantity, candle: CandleGenerated):
+    def __init__(self, name, instrument, trail, side, quantity, candle: CandleGenerated, loss_stop_low: float, loss_stop_high: float):
         # no default values, the system expects to be having values from config
         # else it fails
-        
-        
         # basic information
         self.logger = get_logger(f"OrderObject-{name}")
         self.id = int(time.time()) # unique id for each order, helps in ignoring redundant signals
@@ -47,8 +45,8 @@ class OrderObject(Publisher):
         
         #TODO: read from trading config, very important 
         # this is loss stop, in case of direction switch, although at zero_stop should change the side of order so this should not be triggered, if this is triggered there is gap in system
-        self.loss_stop_low = float(self._trading_config.get('loss_stop_low'))
-        self.loss_stop_high = float(self._trading_config.get('loss_stop_high'))
+        self.loss_stop_low = loss_stop_low
+        self.loss_stop_high = loss_stop_high
         self.loss_stop = basic.round4(self.const_entry_price * (self.loss_stop_low if side == "BUY" else self.loss_stop_high))
 
         
@@ -114,7 +112,20 @@ class OrderObject(Publisher):
         # Check for exit conditions using exit manager
         exit_info = self.exit_manager.check(self)
         if exit_info:
-            self.state = ORDERSTATE.CLOSE
+            self.state = ORDERSTATE.CLOSE   
+        #     orderEvent = OrderEvent()
+        #     orderEvent.order_id = self.id
+        #     orderEvent.timestamp = self.timestamp
+        #     orderEvent.source = self.__class__.__name__
+        #     orderEvent.instrument = self.const_instrument
+        #     orderEvent.side = self.const_side #TODO: opposite side
+        #     orderEvent.price = ltp
+        #     orderEvent.strategy = "EXIT triggered"
+        #     orderEvent.type = "EXIT"
+        #     orderEvent.candle = self.current_candle
+        #     orderEvent.exit_info = exit_info
+        #     orderEvent.timestamp = datetime.now()
+        #     self.event_bus.publish(orderEvent)
 
         else:
             self._update_min_max_price(ltp)

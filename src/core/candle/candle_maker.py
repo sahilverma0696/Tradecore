@@ -99,12 +99,12 @@ class CandleMaker(Publisher, Subscriber):
                 low=candle['low'],
                 close=candle['close'],
                 volume=candle['volume'],
-                vwap=candle.get('vwap', 0.0),
+                vwap=candle.get('vwap'),
                 source="CandleMaker"  # Add missing source parameter
             )
             
             self.publish_event(candle_event)
-            self._logger.info(f"Published candle for {symbol}: O={candle['open']:.2f} H={candle['high']:.2f} L={candle['low']:.2f} C={candle['close']:.2f} V={candle['volume']:.2f}")
+            self._logger.info(f"Published candle for {symbol}: O={candle['open']:.2f} H={candle['high']:.2f} L={candle['low']:.2f} C={candle['close']:.2f} V={candle['volume']:.2f} VWAP={candle['vwap']:.2f}")
             
             # Write to CSV
             self._write_to_csv(candle)

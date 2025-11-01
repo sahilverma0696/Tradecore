@@ -18,10 +18,6 @@ class OrderManager(Subscriber, Publisher):
     def __init__(self, log_dir: str = "logs"):
         super().__init__()  # Initialize both mixins
         
-        # the main dict of all orders
-        # TODO: able to move the closed orders to archive, logging benefit
-        # this is needed to be unique
-        
         self._orders: Dict[str, OrderObject] = {}   # symbol -> OrderObject, unique by ID, State
         self._logger = get_logger("OrderManager")
         self._order_logger = OrderLogger(log_dir)
@@ -47,6 +43,9 @@ class OrderManager(Subscriber, Publisher):
         
         self.subscribe_to_event(CandleGenerated, self._handle_update_candle)
         self._logger.info(f"✅ OrderManager subscribed to EntrySignal and ExitSignal events")
+        
+        self.loss_stop_low = float(self._trading_config.get('loss_stop_low'))
+        self.loss_stop_high = float(self._trading_config.get('loss_stop_high'))
       
     # # this way is not in use  
     # def register_handler(self, cb):
@@ -73,7 +72,7 @@ class OrderManager(Subscriber, Publisher):
             else:
                 self._logger.info(f"Duplicate entry signal, same side for {symbol}, ignoring.")
                 return
-
+            
         # Create new order
         try:
             order = OrderObject(
@@ -82,7 +81,9 @@ class OrderManager(Subscriber, Publisher):
                 trail=self._trading_config.get('trail'),
                 side=side,
                 quantity=self._trading_config.get('quantity'),
-                candle=event.candle
+                candle=event.candle,
+                loss_stop_low=self.loss_stop_low,
+                loss_stop_high=self.loss_stop_high
             )
             
         except Exception as e:
@@ -98,15 +99,6 @@ class OrderManager(Subscriber, Publisher):
         if order.state == ORDERSTATE.OPEN:
             self._write_live_order_data()
         
-
-    # def _handle_exit_signal_from_dict(self, exit_info: Dict[str, Any]):
-    #     """Handle exit signal from OrderObject exit information."""
-    #     symbol = exit_info['symbol']
-    #     exit_price = exit_info['exit_price']
-    #     exit_reason = exit_info['exit_reason']
-    #     quantity = exit_info['quantity']
-        
-    #     self._exit_order(symbol, exit_price, datetime.now(), exit_reason, quantity)
 
     def _execute_order(self, order: OrderObject,type:str):
         
@@ -138,6 +130,7 @@ class OrderManager(Subscriber, Publisher):
         )
         # execute the side as it is 
         self.publish_event(orderEvent)
+        self._cleanup_closed_orders(order.get_instrument())
         
         
         # since this is a an event based system, the sync flow is not expected in functions
@@ -189,24 +182,6 @@ class OrderManager(Subscriber, Publisher):
         except Exception as e:
             self._logger.error(f"Error handling entry signal: {e}")
     
-    # def on_exit_signal(self, event: ExitSignal):
-    #     """Handle exit signal events."""
-    #     try:
-    #         self._logger.info(f"📋 Received exit signal for {event.symbol}: {event.direction} at {event.price}")
-            
-    #         # Process exit signal and close position
-    #         self.handle_exit_signal(event)
-            
-    #     except Exception as e:
-    #         self._logger.error(f"Error handling exit signal: {e}")
-    #     try:
-    #         # self._logger.info(f"📋 Received entry signal for {event.symbol}: {event.direction} at {event.price}")
-    #         # print(f"DEBUG: on_entry_signal received for {event.symbol} side {event.direction}")
-    #         # Process entry signal and place order
-    #         self._handle_entry_signal(event)
-            
-    #     except Exception as e:
-    #         self._logger.error(f"Error handling entry signal: {e}")
     
     def _write_live_order_data(self):
         """Write current live order data to JSON file for IPC with CLI dashboard."""
@@ -230,7 +205,7 @@ class OrderManager(Subscriber, Publisher):
                     "current_ltp": order.ltp,
                     "current_profit_percentage": order.get_current_profit_percentage(),
                     "current_profit": order.get_current_profit(),
-                    "trigger": order.trigger,
+                    "trigger": order.trigger * 100,
                     "retreat": order.get_retreat(),
                     "max_move_percentage": order.get_max_move_percentage(),
                     "min_move_percentage": order.get_min_move_percentage(),
@@ -253,4 +228,12 @@ class OrderManager(Subscriber, Publisher):
             self._logger.error(f"Error writing live order data: {e}")
             import traceback
             self._logger.error(f"Traceback: {traceback.format_exc()}")
+    
+    def _cleanup_closed_orders(self,symbol:str):
+        """Remove closed order for given symbol."""
+        order = self._orders.get(symbol)
+        if order and order.state == ORDERSTATE.CLOSED:
+            del self._orders[symbol]
+            self._logger.info(f"Removed closed order for {symbol} from OrderManager.")
+        #TODO: log this order by event bus into order archives
 

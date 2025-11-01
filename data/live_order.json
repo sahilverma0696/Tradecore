@@ -1,26 +1,26 @@
 {
-  "timestamp": "2025-10-31T17:05:08.133612",
+  "timestamp": "2025-11-01T04:20:29.220067",
   "total_orders": 1,
   "orders": [
     {
-      "id": 1761930300,
+      "id": 1761970800,
       "symbol": "BTCUSDT",
       "instrument": "BTCUSDT",
-      "side": "BUY",
+      "side": "SELL",
       "total_quantity": "100",
-      "entry_price": 109040.88,
+      "entry_price": 110168.32,
       "net_stop": 0,
       "zero_stop": 0,
-      "loss_stop": 106860.0624,
-      "current_ltp": 109075.02,
-      "current_profit_percentage": 0.0313,
-      "current_profit": 34.14,
-      "trigger": 0.0002,
-      "retreat": 0.02,
-      "max_move_percentage": 0.0513,
-      "min_move_percentage": 0.0,
-      "entry_time": "2025-10-31T17:04:00",
-      "last_update": "2025-10-31T17:05:08.133610"
+      "loss_stop": 110190.3537,
+      "current_ltp": 110190.0,
+      "current_profit_percentage": -0.0195,
+      "current_profit": -21.44,
+      "trigger": 0.1,
+      "retreat": 0.0339,
+      "max_move_percentage": 0.0145,
+      "min_move_percentage": -0.0195,
+      "entry_time": "2025-11-01T04:19:00",
+      "last_update": "2025-11-01T04:20:29.220064"
     }
   ]
 }

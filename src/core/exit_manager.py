@@ -5,6 +5,7 @@ from src.core.event_bus.mixins import Publisher
 from src.logger_factory import get_logger
 from src.time_control import TimeChecker
 import src.basic as basic
+from src.global_enum import *
 if TYPE_CHECKING:
     from src.core.order_object import OrderObject
 
@@ -101,7 +102,8 @@ class ExitManager(Publisher):
         if is_opposite_move and difference_percentage >= trigger:
             self.count += 1
             print(f"Triggered retrieval exit #{self.count} ({side})")
-            order.state = "CLOSED"
+            self.logger.info(f"Retrieval trigger exit hit for {order.get_name()} at LTP {ltp}")
+            order.state = ORDERSTATE.CLOSE
             return self._create_exit_info(order, 'RETRIEVAL_TRIGGER', order.quantity, 'FULL')
     
         return None
@@ -117,7 +119,8 @@ class ExitManager(Publisher):
         
         # assuming 1% above 
         if abs(order.ltp - order.net_zero_stop) <= 1 and order.net_zero_state:
-            order.state = "CLOSE"
+            order.state = ORDERSTATE.CLOSE
+            self.logger.info(f"Net zero stop exit hit for {order.get_name()} at LTP {order.get_ltp()}")
             return self._create_exit_info(order, 'ZERO_STOP', order.quantity,'FULL')
         return None
     
@@ -131,7 +134,8 @@ class ExitManager(Publisher):
         # this is around entry price, say within 0.1% of entry price
         threshold = self.dust_value * order.const_entry_price  # 0.01 of entry price
         if abs(ltp - order.const_entry_price) <= threshold and order.zero_stop_state:
-            order.state = "CLOSE"
+            order.state = ORDERSTATE.CLOSE
+            self.logger.info(f"Zero stop exit hit for {order.get_name()} at LTP {order.get_ltp()}")
             return self._create_exit_info(order, 'ZERO_STOP', order.quantity,'FULL')
         return None
 
@@ -146,7 +150,8 @@ class ExitManager(Publisher):
     
         if basic.tolerance(ltp,loss_stop):
             # print("LOSS STOP HIT")
-            order.state = "CLOSE"
+            order.state = ORDERSTATE.CLOSE
+            self.logger.info(f"Loss stop exit hit for {order.get_name()} at LTP {order.get_ltp()}")
             return self._create_exit_info(order, 'LOSS_STOP', order.quantity,'FULL')
         return None
     
@@ -155,7 +160,8 @@ class ExitManager(Publisher):
         #TODO: read from config the market close time 
         market_close_time = '13:37'
         if self.time.is_same_time(market_close_time):
-            order.state = "CLOSE"
+            order.state = ORDERSTATE.CLOSE
+            self.logger.info(f"Market close exit hit for {order.get_name()} at LTP {order.get_ltp()}")
             return self._create_exit_info(order,'MARKET CLOSE',order.quantity,'FULL')
         return None
 
@@ -219,14 +225,18 @@ class ExitManager(Publisher):
         
         # check trigger based exits
         trigger = self._check_on_trigger_exit(order)
+        
+        print("Exit check result:", trigger)
 
-        if trigger is not None and trigger is True:
+        if trigger is not None:
             # create exit signal and send it to executor
             # Send exit signal with opposite side
             print('exit trigger true', trigger)
             opposite_side = "SELL" if order.const_side == "BUY" else "BUY"
             exitEvent = OrderEvent(
                 order_id=order.id,
+                timestamp=order.last_update_time,
+                source=self.__class__.__name__,
                 instrument=order.const_instrument,
                 side=opposite_side,
                 price=order.ltp,
