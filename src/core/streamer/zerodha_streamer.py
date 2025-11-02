@@ -7,10 +7,8 @@ from typing import List, Dict, Any
 from kiteconnect import KiteConnect, KiteTicker
 
 from src.logger_factory import get_logger
-from src.core.executioner import Execute
 from src.core.event_bus import Publisher, QuoteEvent, FullQuoteEvent
 from .base_streamer import BaseStreamer
-from .quote_normalizer import QuoteNormalizer
 from .events import QuoteEvent
 
 
@@ -95,9 +93,7 @@ class ZerodhaStreamer(BaseStreamer):
 
     def _normalize_raw_data(self, raw_data: Dict[str, Any], symbol: str) -> QuoteEvent:
         """Normalize Zerodha tick data to QuoteEvent."""
-        return QuoteNormalizer.normalize_zerodha_tick(
-            raw_data, symbol, self.name
-        )
+        return None
 
     # Kite-specific event handlers
     def _on_ticks(self, ws, ticks):

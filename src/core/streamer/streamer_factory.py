@@ -49,6 +49,8 @@ class StreamerFactory:
                 return cls._create_zerodha_streamer(streamer_class, symbols, config)
             elif streamer_type == 'binance':
                 return cls._create_binance_streamer(streamer_class, symbols, config)
+            elif streamer_type == 'upstox':
+                return cls._create_upstox_streamer(streamer_class, symbols, config)
             else:
                 # Generic creation for other streamers
                 return streamer_class(symbols=symbols, **config)
@@ -96,6 +98,19 @@ class StreamerFactory:
             stream_timeout=config.get('stream_timeout', 60),
             ping_interval=config.get('ping_interval', 180),
             testnet=config.get('testnet', False)
+        )
+        
+    @classmethod
+    def _create_upstox_streamer(cls, streamer_class, symbols: List[Union[str, int]], 
+                                config: Dict[str, Any]):
+        """Create Upstox streamer with specific configuration."""
+        str_symbols = [str(s) for s in symbols]
+        
+        # Pass all relevant config parameters to UpstoxStreamer
+        return streamer_class(
+            symbols=str_symbols,
+            access_token=config.get('access_token'),
+            name_symbol=config.get('name_symbol', 'UPSTOX')
         )
     
     @classmethod
