@@ -1,8 +1,8 @@
 {
   "api_key": "_",
   "api_secret": "_",
-  "symbols": ["btcusdt"],
-  "name_symbol": "btcusdt",
+  "symbols": ["NSE_FO|52859"],
+  "name_symbol": "NSE_FO|52859",
   "paper_trade": false,
   "broker": "zerodha",
   "execution": {
@@ -46,7 +46,7 @@
   "binance": {
     "api_key": "your_binance_api_key",
     "api_secret": "your_binance_secret",
-    "name_symbol": "btcusdt",
+    "name_symbol": "NSE_FO|52859",
     "testnet": false,
     "stream_type": "markPrice",
     "base_url": "https://fapi.binance.com",

@@ -18,7 +18,7 @@ class UpstoxStreamer(BaseStreamer):
 
     def __init__(self, symbols: List[str], access_token: str, name_symbol: str = "UPSTOX"):
         super().__init__(symbols, name_symbol)
-        self.access_token = access_token
+        self.access_token = 'eyJ0eXAiOiJKV1QiLCJrZXlfaWQiOiJza192MS4wIiwiYWxnIjoiSFMyNTYifQ.eyJzdWIiOiJFUjM5MzkiLCJqdGkiOiI2OTA3YmVmZWQ3NjYyZTdhMTZjN2YwMzEiLCJpc011bHRpQ2xpZW50IjpmYWxzZSwiaXNQbHVzUGxhbiI6ZmFsc2UsImlhdCI6MTc2MjExNTMyNiwiaXNzIjoidWRhcGktZ2F0ZXdheS1zZXJ2aWNlIiwiZXhwIjoxNzYyMTIwODAwfQ.6mY89dSuFWQdXulx62kMyTp2_d1o690ruOFBOIGaQzo' #access_token
         self.name_symbol = name_symbol
         self._ws = None
         self._ws_url = None
@@ -33,7 +33,14 @@ class UpstoxStreamer(BaseStreamer):
         }
         url = 'https://api.upstox.com/v3/feed/market-data-feed/authorize'
         api_response = requests.get(url=url, headers=headers)
-        data = api_response.json()
+        try:
+            data = api_response.json()
+        except Exception as e:
+            self._logger.error(f"Failed to parse Upstox API response as JSON: {api_response.text}")
+            raise
+        if "data" not in data or "authorized_redirect_uri" not in data["data"]:
+            self._logger.error(f"Upstox API response missing 'data' or 'authorized_redirect_uri': {data}")
+            raise RuntimeError(f"Upstox API response missing 'data' or 'authorized_redirect_uri': {data}")
         ws_url = data["data"]["authorized_redirect_uri"]
         return ws_url
 
@@ -99,6 +106,7 @@ class UpstoxStreamer(BaseStreamer):
             feeds = feed_dict.get("feeds", {})
             for instrument_key, tick_data in feeds.items():
                 event = self._normalize_raw_data(tick_data, instrument_key)
+                print(event)
                 if event:
                     self.publish_quote(event)
         except Exception as e:
