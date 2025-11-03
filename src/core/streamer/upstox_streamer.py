@@ -5,6 +5,8 @@ import requests
 import websocket
 import pytz
 import datetime
+import asyncio
+import websockets
 from typing import List, Dict, Any
 from google.protobuf.json_format import MessageToDict
 
@@ -18,7 +20,7 @@ class UpstoxStreamer(BaseStreamer):
 
     def __init__(self, symbols: List[str], access_token: str, name_symbol: str = "UPSTOX"):
         super().__init__(symbols, name_symbol)
-        self.access_token = 'eyJ0eXAiOiJKV1QiLCJrZXlfaWQiOiJza192MS4wIiwiYWxnIjoiSFMyNTYifQ.eyJzdWIiOiJFUjM5MzkiLCJqdGkiOiI2OTA3YmVmZWQ3NjYyZTdhMTZjN2YwMzEiLCJpc011bHRpQ2xpZW50IjpmYWxzZSwiaXNQbHVzUGxhbiI6ZmFsc2UsImlhdCI6MTc2MjExNTMyNiwiaXNzIjoidWRhcGktZ2F0ZXdheS1zZXJ2aWNlIiwiZXhwIjoxNzYyMTIwODAwfQ.6mY89dSuFWQdXulx62kMyTp2_d1o690ruOFBOIGaQzo' #access_token
+        self.access_token = 'eyJ0eXAiOiJKV1QiLCJrZXlfaWQiOiJza192MS4wIiwiYWxnIjoiSFMyNTYifQ.eyJzdWIiOiJFUjM5MzkiLCJqdGkiOiI2OTA4NWFjNGMxYmEyNDBjZjZlMjJiNTYiLCJpc011bHRpQ2xpZW50IjpmYWxzZSwiaXNQbHVzUGxhbiI6ZmFsc2UsImlhdCI6MTc2MjE1NTIwNCwiaXNzIjoidWRhcGktZ2F0ZXdheS1zZXJ2aWNlIiwiZXhwIjoxNzYyMjA3MjAwfQ.k9FSKsH0W_Nw4fRt1HxOnG-9wxnejwBhdNSWcM9L_KY' #access_token
         self.name_symbol = name_symbol
         self._ws = None
         self._ws_url = None
@@ -69,6 +71,54 @@ class UpstoxStreamer(BaseStreamer):
             self._ws_connected = False
             raise
 
+    async def _run_connection_async(self):
+        """Async WebSocket connection and message loop using websockets library."""
+        ssl_context = ssl.create_default_context()
+        ssl_context.check_hostname = False
+        ssl_context.verify_mode = ssl.CERT_NONE
+
+        def is_market_closed():
+            now = datetime.datetime.now(pytz.timezone("Asia/Kolkata"))
+            return now.hour > 15 or (now.hour == 15 and now.minute >= 31)
+
+        self._ws_url = self._get_ws_url()
+        self._logger.info(f"[ASYNC] Connecting to Upstox WebSocket: {self._ws_url}")
+        async with websockets.connect(self._ws_url, ssl=ssl_context) as websocket:
+            self._ws_connected = True
+            self._logger.info("[ASYNC] WebSocket connection established.")
+            await asyncio.sleep(1)
+            subscribe_message = {
+                "guid": "someguid",
+                "method": "sub",
+                "data": {
+                    "mode": "full",
+                    "instrumentKeys": self.symbols
+                }
+            }
+            await websocket.send(json.dumps(subscribe_message).encode('utf-8'))
+            self._logger.info(f"[ASYNC] Subscribed to symbols: {self.symbols}")
+            while not is_market_closed() and self._is_running:
+                try:
+                    message = await asyncio.wait_for(websocket.recv(), timeout=10)
+                    self._logger.info(f"[ASYNC] Received message of length {len(message)} bytes")
+                    feed_response = pb.FeedResponse()
+                    feed_response.ParseFromString(message)
+                    feed_dict = MessageToDict(feed_response)
+                    feeds = feed_dict.get("feeds", {})
+                    if not feeds:
+                        self._logger.warning(f"[ASYNC] No feeds in message: {feed_dict}")
+                    for instrument_key, tick_data in feeds.items():
+                        self._logger.info(f"[ASYNC] Feed for {instrument_key}: {tick_data}")
+                        event = self._normalize_raw_data(tick_data, instrument_key)
+                        if event:
+                            self.publish_quote(event)
+                except asyncio.TimeoutError:
+                    self._logger.info("[ASYNC] No data received in 10 seconds. Still listening...")
+                except Exception as e:
+                    self._logger.error(f"[ASYNC] Error receiving/parsing data: {e}")
+            self._logger.info("[ASYNC] Market closed or stopped. Exiting WebSocket loop.")
+            self._ws_connected = False
+
     def _cleanup_connection(self):
         """Cleanup WebSocket connection."""
         if self._ws and self._ws_connected:
@@ -99,18 +149,21 @@ class UpstoxStreamer(BaseStreamer):
     def _on_message(self, ws, message):
         """Handle incoming WebSocket messages (protobuf)."""
         try:
+            self._logger.info(f"Received message of length {len(message)} bytes")
             # Upstox sends protobuf binary, not JSON
             feed_response = pb.FeedResponse()
             feed_response.ParseFromString(message)
             feed_dict = MessageToDict(feed_response)
             feeds = feed_dict.get("feeds", {})
+            if not feeds:
+                self._logger.warning(f"No feeds in message: {feed_dict}")
             for instrument_key, tick_data in feeds.items():
+                self._logger.info(f"Feed for {instrument_key}: {tick_data}")
                 event = self._normalize_raw_data(tick_data, instrument_key)
-                print(event)
                 if event:
                     self.publish_quote(event)
         except Exception as e:
-            self._logger.error(f"Error parsing Upstox message: {e}")
+            self._logger.error(f"Error parsing Upstox message: {e} (raw: {message})")
 
     def _on_error(self, ws, error):
         """Handle WebSocket errors."""
@@ -126,24 +179,32 @@ class UpstoxStreamer(BaseStreamer):
     def _normalize_raw_data(self, raw_data: Dict[str, Any], symbol: str) -> QuoteEvent:
         """Normalize Upstox tick data to QuoteEvent."""
         try:
-            # Extract fullFeed/marketFF/ltpc fields
-            market_ff = raw_data.get("fullFeed", {}).get("marketFF", {})
-            ltpc_data = market_ff.get("ltpc", {})
+            self._logger.info(f"[NORMALIZE] Raw data for {symbol}: {raw_data}")
+            full_feed = raw_data.get("fullFeed", {})
+            # Try both marketFF (for stocks/futures) and indexFF (for indices)
+            ff = full_feed.get("marketFF") or full_feed.get("indexFF") or {}
+            ltpc_data = ff.get("ltpc", {})
             if not ltpc_data:
+                self._logger.warning(f"[NORMALIZE] No ltpc_data for {symbol}: {ff}")
                 return None
             ltp = float(ltpc_data.get("ltp", 0))
-            ltq = int(ltpc_data.get("ltq", "0"))
-            cp = float(ltpc_data.get("cp", 0))
+            # Some feeds may not have ltq (quantity), default to 0
+            ltq = int(ltpc_data.get("ltq", "0")) if "ltq" in ltpc_data else 0
             ts = datetime.datetime.now(pytz.timezone("Asia/Kolkata"))
-            return QuoteEvent(
+            event = QuoteEvent(
                 timestamp=ts,
                 instrument=symbol,
                 name=self.name_symbol,
                 ltp=ltp,
                 ltq=ltq,
-                source=self.name,
-                cp=cp
+                source=self.name
             )
+            self._logger.info(f"[NORMALIZE] Created QuoteEvent: {event}")
+            return event
         except Exception as e:
             self._logger.error(f"Error normalizing Upstox data: {e}")
             return None
+
+    def publish_quote(self, event):
+        self._logger.info(f"[PUBLISH] Publishing event: {event}")
+        super().publish_quote(event)

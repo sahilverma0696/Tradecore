@@ -1,8 +1,8 @@
 {
   "api_key": "_",
   "api_secret": "_",
-  "symbols": ["NSE_FO|52859"],
-  "name_symbol": "NSE_FO|52859",
+  "symbols": ["NSE_FO|52877"],
+  "name_symbol": "NSE_FO|52877",
   "paper_trade": false,
   "broker": "zerodha",
   "execution": {

@@ -1,12 +1,12 @@
 {
-  "timestamp": "2025-11-02T19:47:25.305010",
+  "timestamp": "2025-11-03T08:38:44.662354",
   "type": "QuoteEvent",
   "data": {
-    "instrument": "BTCUSDT",
-    "ltp": 110094.99,
-    "ltq": 9e-05,
-    "name": "btcusdt",
-    "source": "BinanceStreamer",
-    "timestamp": "2025-11-02T19:47:27.297000"
+    "instrument": "NSE_FO|52877",
+    "ltp": 375.4,
+    "ltq": 75,
+    "name": "UPSTOX",
+    "source": "UpstoxStreamer",
+    "timestamp": "2025-11-03T14:08:44.661745+05:30"
   }
 }
