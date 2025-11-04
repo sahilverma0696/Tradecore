@@ -1,26 +1,26 @@
 {
-  "timestamp": "2025-11-03T08:30:00.477475",
+  "timestamp": "2025-11-04T04:41:52.987339",
   "total_orders": 1,
   "orders": [
     {
-      "id": 1762158600,
-      "symbol": "NSE_FO|52877",
-      "instrument": "NSE_FO|52877",
-      "side": "BUY",
+      "id": 1762231140,
+      "symbol": "NSE_FO|47660",
+      "instrument": "NSE_FO|47660",
+      "side": "SELL",
       "total_quantity": "100",
-      "entry_price": 377.95,
+      "entry_price": 85.9,
       "net_stop": 0,
-      "zero_stop": 0,
-      "loss_stop": 377.8744,
-      "current_ltp": 377.65,
-      "current_profit_percentage": 0.0,
-      "current_profit": 0.0,
-      "trigger": 0.045,
-      "retreat": 0.0,
-      "max_move_percentage": 0.0,
+      "zero_stop": 85.9,
+      "loss_stop": 87.618,
+      "current_ltp": 82.75,
+      "current_profit_percentage": 4.5984,
+      "current_profit": 3.95,
+      "trigger": 7.000000000000001,
+      "retreat": 6.17,
+      "max_move_percentage": 10.7683,
       "min_move_percentage": 0.0,
-      "entry_time": "2025-11-03T13:55:00+05:30",
-      "last_update": "2025-11-03T08:30:00.477471"
+      "entry_time": "2025-11-04T10:06:00+05:30",
+      "last_update": "2025-11-04T04:41:52.987331"
     }
   ]
 }

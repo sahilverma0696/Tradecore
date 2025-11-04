@@ -1,12 +1,12 @@
 {
-  "timestamp": "2025-11-03T08:38:44.662354",
+  "timestamp": "2025-11-04T04:53:59.232447",
   "type": "QuoteEvent",
   "data": {
-    "instrument": "NSE_FO|52877",
-    "ltp": 375.4,
+    "instrument": "NSE_FO|47660",
+    "ltp": 76.05,
     "ltq": 75,
     "name": "UPSTOX",
     "source": "UpstoxStreamer",
-    "timestamp": "2025-11-03T14:08:44.661745+05:30"
+    "timestamp": "2025-11-04T10:23:59.230175+05:30"
   }
 }

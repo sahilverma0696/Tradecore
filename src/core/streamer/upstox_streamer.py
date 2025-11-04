@@ -18,9 +18,11 @@ import src.core.streamer.MarketDataFeedV3_pb2 as pb
 class UpstoxStreamer(BaseStreamer):
     """Upstox WebSocket streamer implementation."""
 
+    #TODO: full feed event for storage and analysis
     def __init__(self, symbols: List[str], access_token: str, name_symbol: str = "UPSTOX"):
         super().__init__(symbols, name_symbol)
-        self.access_token = 'eyJ0eXAiOiJKV1QiLCJrZXlfaWQiOiJza192MS4wIiwiYWxnIjoiSFMyNTYifQ.eyJzdWIiOiJFUjM5MzkiLCJqdGkiOiI2OTA4NWFjNGMxYmEyNDBjZjZlMjJiNTYiLCJpc011bHRpQ2xpZW50IjpmYWxzZSwiaXNQbHVzUGxhbiI6ZmFsc2UsImlhdCI6MTc2MjE1NTIwNCwiaXNzIjoidWRhcGktZ2F0ZXdheS1zZXJ2aWNlIiwiZXhwIjoxNzYyMjA3MjAwfQ.k9FSKsH0W_Nw4fRt1HxOnG-9wxnejwBhdNSWcM9L_KY' #access_token
+        #TODO: Read access token from config or secure storage
+        self.access_token = 'eyJ0eXAiOiJKV1QiLCJrZXlfaWQiOiJza192MS4wIiwiYWxnIjoiSFMyNTYifQ.eyJzdWIiOiJFUjM5MzkiLCJqdGkiOiI2OTA5NzQ4Zjg0OGIyZjE5Zjc0ZDliNDgiLCJpc011bHRpQ2xpZW50IjpmYWxzZSwiaXNQbHVzUGxhbiI6ZmFsc2UsImlhdCI6MTc2MjIyNzM0MywiaXNzIjoidWRhcGktZ2F0ZXdheS1zZXJ2aWNlIiwiZXhwIjoxNzYyMjkzNjAwfQ.GtXRuVdGce2er-d1Lx8Nq9MoAEMd1eqhlu2TDlbDKfw' #access_token
         self.name_symbol = name_symbol
         self._ws = None
         self._ws_url = None
@@ -100,7 +102,7 @@ class UpstoxStreamer(BaseStreamer):
             while not is_market_closed() and self._is_running:
                 try:
                     message = await asyncio.wait_for(websocket.recv(), timeout=10)
-                    self._logger.info(f"[ASYNC] Received message of length {len(message)} bytes")
+                    # self._logger.info(f"[ASYNC] Received message of length {len(message)} bytes")
                     feed_response = pb.FeedResponse()
                     feed_response.ParseFromString(message)
                     feed_dict = MessageToDict(feed_response)
@@ -108,7 +110,7 @@ class UpstoxStreamer(BaseStreamer):
                     if not feeds:
                         self._logger.warning(f"[ASYNC] No feeds in message: {feed_dict}")
                     for instrument_key, tick_data in feeds.items():
-                        self._logger.info(f"[ASYNC] Feed for {instrument_key}: {tick_data}")
+                        # self._logger.info(f"[ASYNC] Feed for {instrument_key}: {tick_data}")
                         event = self._normalize_raw_data(tick_data, instrument_key)
                         if event:
                             self.publish_quote(event)

@@ -121,7 +121,7 @@ class OrderManager(Subscriber, Publisher):
             order_id=order.id,
             instrument=order.get_instrument(),
             side=side,
-            price=order.ltp,
+            price=order.ltp if order.ltp != 0 else order.const_entry_price,
             strategy="VWAP",
             type=type,
             candle= order.current_candle,

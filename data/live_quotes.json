@@ -1,30 +1,9 @@
 {
-  "BTCUSDT": {
-    "symbol": "BTCUSDT",
-    "ltp": 110094.99,
-    "ltq": 9e-05,
-    "timestamp": "2025-11-02T19:47:27.297000",
-    "source": "BinanceStreamer"
-  },
-  "NSE_INDEX|Nifty 50": {
-    "symbol": "NSE_INDEX|Nifty 50",
-    "ltp": 25754.1,
-    "ltq": 0.0,
-    "timestamp": "2025-11-03T13:29:53.227398+05:30",
-    "source": "UpstoxStreamer"
-  },
-  "NSE_FO|52859": {
-    "symbol": "NSE_FO|52859",
-    "ltp": 427.0,
+  "NSE_FO|47660": {
+    "symbol": "NSE_FO|47660",
+    "ltp": 76.05,
     "ltq": 75.0,
-    "timestamp": "2025-11-03T13:33:45.424210+05:30",
-    "source": "UpstoxStreamer"
-  },
-  "NSE_FO|52877": {
-    "symbol": "NSE_FO|52877",
-    "ltp": 375.4,
-    "ltq": 75.0,
-    "timestamp": "2025-11-03T14:08:44.661745+05:30",
+    "timestamp": "2025-11-04T10:23:59.230175+05:30",
     "source": "UpstoxStreamer"
   }
 }

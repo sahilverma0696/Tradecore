@@ -41,13 +41,26 @@
   "NSE_FO|52877": {
     "symbol": "NSE_FO|52877",
     "timeframe": "5min",
-    "timestamp": "2025-11-03T14:00:00+05:30",
-    "open": 377.65,
-    "high": 387.5,
-    "low": 377.2,
-    "close": 378.95,
-    "volume": 34875.0,
-    "vwap": 372.3101297968397,
+    "timestamp": "2025-11-04T09:05:00+05:30",
+    "open": 379.95,
+    "high": 379.95,
+    "low": 379.95,
+    "close": 379.95,
+    "volume": 75.0,
+    "vwap": 379.95,
+    "is_complete": true,
+    "source": "CandleMaker"
+  },
+  "NSE_FO|47660": {
+    "symbol": "NSE_FO|47660",
+    "timeframe": "5min",
+    "timestamp": "2025-11-04T10:18:00+05:30",
+    "open": 65.5,
+    "high": 69.95,
+    "low": 65.5,
+    "close": 67.15,
+    "volume": 34050.0,
+    "vwap": 83.04445133719327,
     "is_complete": true,
     "source": "CandleMaker"
   }

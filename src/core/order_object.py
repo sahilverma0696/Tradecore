@@ -24,7 +24,7 @@ class OrderObject(Publisher):
         self.const_name = name
         self.const_instrument = instrument
         self.state = ORDERSTATE.OPEN
-        self.const_side = side.upper()  # 'BUY' or 'SELL'
+        self.const_side = side.upper()  # 'BUY' or 'SELL' #TODO: HANDLE AS ENUM
         
 
         # information from config and is in steps
@@ -47,7 +47,7 @@ class OrderObject(Publisher):
         # this is loss stop, in case of direction switch, although at zero_stop should change the side of order so this should not be triggered, if this is triggered there is gap in system
         self.loss_stop_low = loss_stop_low
         self.loss_stop_high = loss_stop_high
-        self.loss_stop = basic.round4(self.const_entry_price * (self.loss_stop_low if side == "BUY" else self.loss_stop_high))
+        self.loss_stop = basic.round4(self.const_entry_price * (self.loss_stop_low if self.const_side == "BUY" else self.loss_stop_high))
 
         
         # net zero stop, to be set such that no loss happens
