@@ -6,8 +6,10 @@ from typing import Dict, Any  # Add missing imports
 from src.logger_factory import get_logger
 import os
 import traceback
+from src.system_config_manager import SystemConfigManager
 
-import pandas as pd
+
+# import pandas as pd
 # from src.core.plotting.live_chart_server import LiveChartServer
 from src.core.event_bus.mixins import Publisher, Subscriber
 from src.core.event_bus.events import QuoteEvent, CandleGenerated
@@ -26,7 +28,8 @@ class CandleMaker(Publisher, Subscriber):
         self._current: dict = {}
         self._vwap_data = defaultdict(lambda: {"cum_tp_vol": 0.0, "cum_vol": 0.0})
         self._logger = get_logger("CandleMaker")
-        self.timeframe = "5min"  # Add missing timeframe attribute
+        self.system_config = SystemConfigManager()
+        self.timeframe = self.system_config.get("candle_maker.default_timeframe")
 
         # ensure header
         if not os.path.exists(self._csv_file):
@@ -93,7 +96,7 @@ class CandleMaker(Publisher, Subscriber):
             candle_event = CandleGenerated(
                 timestamp=candle['timestamp'],
                 symbol=symbol,
-                timeframe=self.timeframe,
+                timeframe=str(self.timeframe),
                 open=candle['open'],
                 high=candle['high'],
                 low=candle['low'],

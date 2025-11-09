@@ -1,26 +1,26 @@
 {
-  "timestamp": "2025-11-04T04:41:52.987339",
+  "timestamp": "2025-11-09T08:12:01.855369",
   "total_orders": 1,
   "orders": [
     {
-      "id": 1762231140,
-      "symbol": "NSE_FO|47660",
-      "instrument": "NSE_FO|47660",
+      "id": 1762675920,
+      "symbol": "BTCUSDT",
+      "instrument": "BTCUSDT",
       "side": "SELL",
       "total_quantity": "100",
-      "entry_price": 85.9,
+      "entry_price": 101917.05,
       "net_stop": 0,
-      "zero_stop": 85.9,
-      "loss_stop": 87.618,
-      "current_ltp": 82.75,
-      "current_profit_percentage": 4.5984,
-      "current_profit": 3.95,
-      "trigger": 7.000000000000001,
-      "retreat": 6.17,
-      "max_move_percentage": 10.7683,
-      "min_move_percentage": 0.0,
-      "entry_time": "2025-11-04T10:06:00+05:30",
-      "last_update": "2025-11-04T04:41:52.987331"
+      "zero_stop": 0,
+      "loss_stop": 101937.4334,
+      "current_ltp": 101937.05,
+      "current_profit_percentage": -0.0194,
+      "current_profit": -19.74,
+      "trigger": 0.09,
+      "retreat": 0.0194,
+      "max_move_percentage": 0.0,
+      "min_move_percentage": -0.0194,
+      "entry_time": "2025-11-09T08:09:00",
+      "last_update": "2025-11-09T08:12:01.855367"
     }
   ]
 }

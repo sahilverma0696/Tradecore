@@ -31,7 +31,7 @@
     "system_workers": 2
   },
   "streamer": {
-    "type": "upstox",
+    "type": "binance",
     "async_enabled": true,
     "config": {
       "offline": {
@@ -119,7 +119,7 @@
     "save_session": true
   },
   "candle_maker": {
-    "default_timeframe": "5min",
+    "default_timeframe": 3,
     "max_candles_memory": 1000,
     "persist_candles": true,
     "validate_ohlc": true,

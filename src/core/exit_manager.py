@@ -226,7 +226,7 @@ class ExitManager(Publisher):
         # check trigger based exits
         trigger = self._check_on_trigger_exit(order)
         
-        print("Exit check result:", trigger)
+        # print("Exit check result:", trigger)
 
         if trigger is not None:
             # create exit signal and send it to executor

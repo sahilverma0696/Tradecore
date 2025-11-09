@@ -1,9 +1,9 @@
 {
-  "NSE_FO|47660": {
-    "symbol": "NSE_FO|47660",
-    "ltp": 76.05,
-    "ltq": 75.0,
-    "timestamp": "2025-11-04T10:23:59.230175+05:30",
-    "source": "UpstoxStreamer"
+  "BTCUSDT": {
+    "symbol": "BTCUSDT",
+    "ltp": 101950.96,
+    "ltq": 0.0027,
+    "timestamp": "2025-11-09T08:13:45.769000",
+    "source": "BinanceStreamer"
   }
 }
