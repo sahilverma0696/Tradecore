@@ -22,7 +22,7 @@ class UpstoxStreamer(BaseStreamer):
     def __init__(self, symbols: List[str], access_token: str, name_symbol: str = "UPSTOX"):
         super().__init__(symbols, name_symbol)
         #TODO: Read access token from config or secure storage
-        self.access_token = 'eyJ0eXAiOiJKV1QiLCJrZXlfaWQiOiJza192MS4wIiwiYWxnIjoiSFMyNTYifQ.eyJzdWIiOiJFUjM5MzkiLCJqdGkiOiI2OTA5NzQ4Zjg0OGIyZjE5Zjc0ZDliNDgiLCJpc011bHRpQ2xpZW50IjpmYWxzZSwiaXNQbHVzUGxhbiI6ZmFsc2UsImlhdCI6MTc2MjIyNzM0MywiaXNzIjoidWRhcGktZ2F0ZXdheS1zZXJ2aWNlIiwiZXhwIjoxNzYyMjkzNjAwfQ.GtXRuVdGce2er-d1Lx8Nq9MoAEMd1eqhlu2TDlbDKfw' #access_token
+        self.access_token = 'eyJ0eXAiOiJKV1QiLCJrZXlfaWQiOiJza192MS4wIiwiYWxnIjoiSFMyNTYifQ.eyJzdWIiOiJFUjM5MzkiLCJqdGkiOiI2OTE2YTFkYjNmNWNhODRkMDdjMzk0ZTQiLCJpc011bHRpQ2xpZW50IjpmYWxzZSwiaXNQbHVzUGxhbiI6ZmFsc2UsImlhdCI6MTc2MzA5MDkwNywiaXNzIjoidWRhcGktZ2F0ZXdheS1zZXJ2aWNlIiwiZXhwIjoxNzYzMTU3NjAwfQ.mBARe1doZCoF6DpF8lqkCC01PCLvgxaTguZJGWNtzdo' #access_token
         self.name_symbol = name_symbol
         self._ws = None
         self._ws_url = None
@@ -208,5 +208,5 @@ class UpstoxStreamer(BaseStreamer):
             return None
 
     def publish_quote(self, event):
-        self._logger.info(f"[PUBLISH] Publishing event: {event}")
+        # self._logger.info(f"[PUBLISH] Publishing event: {event}")
         super().publish_quote(event)

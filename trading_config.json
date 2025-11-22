@@ -1,8 +1,8 @@
 {
   "api_key": "_",
   "api_secret": "_",
-  "symbols": ["btcusdt"],
-  "name_symbol": "btcusdt",
+  "symbols": ["NSE_FO|44277"],
+  "name_symbol": "NSE_FO|44277",
   "paper_trade": false,
   "broker": "zerodha",
   "execution": {
@@ -36,9 +36,9 @@
     }
   },
   "quantity": "100",
-  "trail": 0.0009,
-  "loss_stop_low": 0.9998,
-  "loss_stop_high": 1.0002,
+  "trail": 0.03,
+  "loss_stop_low": 0.96,
+  "loss_stop_high": 1.06,
   "market_close_time": "13:39",
   "default_quantity": 75,
   "buy_quantity": 225,

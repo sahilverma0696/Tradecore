@@ -1,9 +1,23 @@
 {
   "BTCUSDT": {
     "symbol": "BTCUSDT",
-    "ltp": 101950.96,
-    "ltq": 0.0027,
-    "timestamp": "2025-11-09T08:13:45.769000",
+    "ltp": 104768.37,
+    "ltq": 5e-05,
+    "timestamp": "2025-11-09T22:52:56.804000",
     "source": "BinanceStreamer"
+  },
+  "NSE_FO|40093": {
+    "symbol": "NSE_FO|40093",
+    "ltp": 240.1,
+    "ltq": 750.0,
+    "timestamp": "2025-11-11T15:15:14.797844+05:30",
+    "source": "UpstoxStreamer"
+  },
+  "NSE_FO|44277": {
+    "symbol": "NSE_FO|44277",
+    "ltp": 310.25,
+    "ltq": 75.0,
+    "timestamp": "2025-11-14T15:15:06.836911+05:30",
+    "source": "UpstoxStreamer"
   }
 }

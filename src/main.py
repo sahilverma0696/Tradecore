@@ -22,6 +22,8 @@ from src.strategies.vwap_strategy import VwapStrategy
 from src.core.executors.executor_factory import ExecutorFactory
 from src.core.streamer.streamer_factory import StreamerFactory
 
+from src.data_store.quote_event_db_subscriber import QuoteEventDBSubscriber
+
 logger = get_logger("MAIN", console_output=True)
 
 # Global shutdown event for graceful cleanup
@@ -112,6 +114,7 @@ def create_and_register_components(system_config, trading_config):
         components['vwap_strategy'] = VwapStrategy(config=config)
         # logger.info("   ✅ VwapStrategy registered for candle → signal generation")
         
+        components['quote_db_subscriber'] = QuoteEventDBSubscriber()
         
         # Create executor using factory
         logger.info("Creating executor...")
