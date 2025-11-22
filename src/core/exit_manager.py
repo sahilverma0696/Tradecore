@@ -72,40 +72,61 @@ class ExitManager(Publisher):
         '''
         Check if retrieval trigger exit is triggered.
         THIS IS SAVING PROFIT EXIT
-        
-        Trigger only on opposite direction:
-            - BUY → trigger on fall
-            - SELL → trigger on rise
+
+        Steps: 1.5%, 3%, 4.5%, 6%, ...
+        When price retreats, exit at the last step price crossed, not at the retrace price.
         '''
-        trigger = order.get_current_trigger() * 100
+        step_size = 1.5  # percent
+        max_steps = 10   # up to 15% (adjust as needed)
+        step_thresholds = [step_size * (i + 1) for i in range(max_steps)]
+
         side = order.get_side()
         ltp = order.get_ltp()
+        entry_price = order.get_entry_price()
         max_price = order.get_max_price()
         min_price = order.get_min_price()
-    
-        # Calculate percentage difference from the extreme point (max/min)
+
+        # Calculate max favorable move percentage and step index
         if side == "BUY":
-            # fall from the top (max price)
-            difference = max_price - ltp
-            difference_percentage = basic.round4((difference / max_price) * 100)
-            is_opposite_move = ltp < max_price  # falling
+            max_move_pct = ((max_price - entry_price) / entry_price) * 100
+            current_move_pct = ((ltp - entry_price) / entry_price) * 100
         else:  # SELL
-            # rise from the bottom (min price)
-            difference = ltp - min_price
-            difference_percentage = basic.round4((difference / min_price) * 100)
-            is_opposite_move = ltp > min_price  # rising
-    
-        # Debug info (optional)
-        # print(f"[{side}] ltp={ltp}, max={max_price}, min={min_price}, diff%={difference_percentage},opp_side={is_opposite_move} trigger={trigger}")
-    
-        # Trigger only if moving opposite to entry direction and threshold met
-        if is_opposite_move and difference_percentage >= trigger:
-            self.count += 1
-            print(f"Triggered retrieval exit #{self.count} ({side})")
-            self.logger.info(f"Retrieval trigger exit hit for {order.get_name()} at LTP {ltp}")
-            order.state = ORDERSTATE.CLOSE
-            return self._create_exit_info(order, 'RETRIEVAL_TRIGGER', order.quantity, 'FULL')
-    
+            max_move_pct = ((entry_price - min_price) / entry_price) * 100
+            current_move_pct = ((entry_price - ltp) / entry_price) * 100
+
+        # Find the highest step crossed
+        last_step_pct = 0
+        for step in step_thresholds:
+            if max_move_pct >= step:
+                last_step_pct = step
+            else:
+                break
+
+        # Track last step crossed in order object
+        if not hasattr(order, 'retrieval_last_step_pct'):
+            order.retrieval_last_step_pct = 0
+        if last_step_pct > order.retrieval_last_step_pct:
+            order.retrieval_last_step_pct = last_step_pct
+
+        # If price retreats below last step price, trigger exit at that step price
+        if order.retrieval_last_step_pct > 0:
+            if side == "BUY":
+                step_price = entry_price * (1 + order.retrieval_last_step_pct / 100)
+                if ltp <= step_price:
+                    self.count += 1
+                    print(f"Triggered retrieval exit #{self.count} ({side}) at step {order.retrieval_last_step_pct}% (price {step_price})")
+                    self.logger.info(f"Retrieval trigger exit hit for {order.get_name()} at LTP {ltp} (step {order.retrieval_last_step_pct}%)")
+                    order.state = ORDERSTATE.CLOSE
+                    return self._create_exit_info(order, f'RETRIEVAL_TRIGGER_{order.retrieval_last_step_pct}', order.quantity, 'FULL')
+            else:  # SELL
+                step_price = entry_price * (1 - order.retrieval_last_step_pct / 100)
+                if ltp >= step_price:
+                    self.count += 1
+                    print(f"Triggered retrieval exit #{self.count} ({side}) at step {order.retrieval_last_step_pct}% (price {step_price})")
+                    self.logger.info(f"Retrieval trigger exit hit for {order.get_name()} at LTP {ltp} (step {order.retrieval_last_step_pct}%)")
+                    order.state = ORDERSTATE.CLOSE
+                    return self._create_exit_info(order, f'RETRIEVAL_TRIGGER_{order.retrieval_last_step_pct}', order.quantity, 'FULL')
+
         return None
 
 
