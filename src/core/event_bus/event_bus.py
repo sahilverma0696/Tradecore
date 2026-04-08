@@ -152,6 +152,12 @@ class EventBus:
                     subscribers.extend(self._subscribers[cls])
 
         # ── 3. Dispatch – lock released ───────────────────────────────
+        if not subscribers:
+            self._logger.warning(
+                f"No subscribers for {event.__class__.__name__} – event dropped"
+            )
+            return
+
         for callback in subscribers:
             try:
                 callback(event)

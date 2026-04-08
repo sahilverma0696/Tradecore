@@ -164,25 +164,63 @@ def create_and_register_components(system_config, trading_config):
         logger.error(f"❌ Failed to create components: {e}")
         raise
 
-# def wire_component_dependencies(components):
-#     """Wire direct dependencies between components (non-event based)."""
-#     logger.info("🔗 Wiring component dependencies...")
-    
-#     try:
-#         # Only wire OrderManager and Executor now
-#         # ExitManager is no longer needed as exit logic is in OrderObject
-#         order_manager = components['order_manager']
-#         executor = components['executor']
-        
-#         # Wire executor to order manager
-#         logger.info("   🔗 Connecting Executor → OrderManager")
-#         order_manager.register_handler(executor.execute_order)
-        
-#         logger.info("✅ Component dependencies wired successfully")
-        
-#     except Exception as e:
-#         logger.error(f"❌ Failed to wire components: {e}")
-#         raise
+def validate_system_wiring():
+    """
+    Pre-flight check: verify every critical event flow has its minimum
+    number of subscribers before the streamer is allowed to start.
+
+    If any flow is broken the system raises immediately rather than
+    running silently with missing components.
+
+    Critical wiring map
+    -------------------
+    QuoteEvent      -> CandleMaker + OrderManager            (min 2)
+    CandleGenerated -> VwapStrategy + OrderManager           (min 2)
+    EntrySignal     -> OrderManager                          (min 1)
+    OrderEvent      -> Executor                              (min 1)
+    """
+    from src.core.event_bus.events import (
+        QuoteEvent, CandleGenerated, EntrySignal, OrderEvent
+    )
+
+    REQUIRED: dict = {
+        QuoteEvent:      (2, "CandleMaker + OrderManager"),
+        CandleGenerated: (2, "VwapStrategy + OrderManager"),
+        EntrySignal:     (1, "OrderManager"),
+        OrderEvent:      (1, "Executor"),
+    }
+
+    event_bus = EventBus()
+    failures = []
+    ok = []
+
+    for event_type, (min_count, expected) in REQUIRED.items():
+        actual = event_bus.get_subscriber_count(event_type)
+        if actual < min_count:
+            failures.append(
+                f"  MISSING  {event_type.__name__:<20} "
+                f"got {actual}, need >={min_count}  ({expected})"
+            )
+        else:
+            ok.append(
+                f"  OK       {event_type.__name__:<20} "
+                f"{actual} subscriber(s)  ({expected})"
+            )
+
+    logger.info("System wiring check:")
+    for line in ok:
+        logger.info(line)
+    for line in failures:
+        logger.error(line)
+
+    if failures:
+        raise RuntimeError(
+            f"System wiring incomplete – {len(failures)} flow(s) not connected. "
+            "Fix component registration before starting."
+        )
+
+    logger.info("All event flows connected – system ready to start")
+
 
 def start_system_components(components, system_config):
     """Start all system components in proper order."""
@@ -312,10 +350,10 @@ def main():
         
         # PHASE 3: Create and register all components with event bus
         components = create_and_register_components(system_config, trading_config)
-        
-        # # PHASE 4: Wire direct dependencies (non-event based)
-        # wire_component_dependencies(components)
-        
+
+        # PHASE 4: Validate every critical event flow is wired before starting
+        validate_system_wiring()
+
         # PHASE 5: Start all system components
         streaming_future = start_system_components(components, system_config)
         
