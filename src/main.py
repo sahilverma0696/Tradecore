@@ -137,9 +137,9 @@ def create_and_register_components(system_config, trading_config):
         # Get symbols from main configuration for other streamers
         symbols = trading_config.get().get('symbols')
         if not symbols:
-            logger.error("No symbols configured for streaming. Sending exit signal.")
+            logger.error("No symbols configured for streaming.")
             shutdown_event.set()
-            sys.exit(1)         # TODO: proper exit signal needed for graceful shutdown
+            raise RuntimeError("No symbols configured – cannot start streamer")
         
         logger.info(f"   📡 Creating {streamer_type} streamer...")
         components['streamer'] = StreamerFactory.create_streamer(
@@ -150,11 +150,12 @@ def create_and_register_components(system_config, trading_config):
         logger.info(f"   ✅ {streamer_type} streamer created for market data")
         
         # Log subscription status
-        logger.info("📢 Event subscription summary:")
+        from src.core.event_bus.events import QuoteEvent, CandleGenerated, EntrySignal
+        logger.info("Event subscription summary:")
         event_bus = EventBus()
-        logger.info(f"   QuoteEvent subscribers: {len(event_bus._subscribers.get('QuoteEvent', []))}")
-        logger.info(f"   CandleGenerated subscribers: {len(event_bus._subscribers.get('CandleGenerated', []))}")
-        logger.info(f"   EntrySignal subscribers: {len(event_bus._subscribers.get('EntrySignal', []))}")
+        logger.info(f"   QuoteEvent subscribers: {event_bus.get_subscriber_count(QuoteEvent)}")
+        logger.info(f"   CandleGenerated subscribers: {event_bus.get_subscriber_count(CandleGenerated)}")
+        logger.info(f"   EntrySignal subscribers: {event_bus.get_subscriber_count(EntrySignal)}")
         
         logger.info("✅ All components created and registered with EventBus")
         return components
@@ -217,34 +218,46 @@ def start_system_components(components, system_config):
         logger.error(f"❌ Failed to start system components: {e}")
         raise
 
-def run_monitoring_loop(components, thread_manager):
+def run_monitoring_loop(components, thread_manager, streaming_future=None):
     """Run the main system monitoring loop."""
-    logger.info("👁️ Entering main monitoring loop... Press Ctrl+C to stop")
-    
+    logger.info("Entering main monitoring loop... Press Ctrl+C to stop")
+
     streamer = components.get('streamer')
-    
+
     while not shutdown_event.is_set():
         try:
-            # System health monitoring
-            if thread_manager:
+            # Check whether the async streamer task died unexpectedly
+            if streaming_future is not None and streaming_future.done():
+                exc = None
+                try:
+                    exc = streaming_future.exception()
+                except Exception as e:
+                    exc = e
+                if exc is not None:
+                    logger.error(f"Streamer task failed: {exc} – initiating shutdown")
+                    shutdown_event.set()
+                    break
+                # Future completed cleanly (streamer ran to end) – treat as stop
+                if not shutdown_event.is_set():
+                    logger.warning("Streamer task ended without error – shutting down")
+                    shutdown_event.set()
+                    break
+
+            # System health
+            if thread_manager and thread_manager.is_alive():
                 stats = thread_manager.get_pool_stats()
-                total_active = sum(pool.get('active_tasks', 0) for pool in stats.values())
-                
+                total_active = sum(p.get('active_tasks', 0) for p in stats.values())
                 if total_active > 0:
-                    logger.debug(f"Active tasks across all pools: {total_active}")
-            
-            # Check streamer status
+                    logger.debug(f"Active tasks across pools: {total_active}")
+
+            # Check streamer is still alive
             if streamer and hasattr(streamer, 'get_status'):
                 status = streamer.get_status()
                 if not status.get('is_running', False):
-                    logger.warning("⚠️ Streamer is not running - may need restart")
-            
-            # Sleep and check for shutdown signal
-            shutdown_event.wait(timeout=30.0)  # Check every 30 seconds
-            
-        except KeyboardInterrupt:
-            logger.info("Keyboard interrupt received")
-            break
+                    logger.warning("Streamer is not running – may need restart")
+
+            shutdown_event.wait(timeout=30.0)
+
         except Exception as e:
             logger.error(f"Error in monitoring loop: {e}")
             break
@@ -311,7 +324,7 @@ def main():
         # logger.info("🔄 Market data streaming and strategy processing active")
         
         # PHASE 6: Run monitoring loop
-        run_monitoring_loop(components, thread_manager)
+        run_monitoring_loop(components, thread_manager, streaming_future)
         
     except Exception as e:
         logger.error(f"💥 Critical error in main: {e}")
