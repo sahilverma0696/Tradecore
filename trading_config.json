@@ -1,55 +1,39 @@
 {
-  "api_key": "_",
-  "api_secret": "_",
-  "symbols": ["NSE_FO|44277"],
-  "name_symbol": "NSE_FO|44277",
-  "paper_trade": false,
-  "broker": "zerodha",
-  "execution": {
-    "delta_sell": 0.02,
-    "delta_buy": 0.04,
-    "max_retries": 3,
-    "retry_delay": 50,
-    "exchange": "NFO",
-    "product": "MIS",
-    "quantities": {
-      "default": 75,
-      "NIFTY_50": 75,
-      "BANKNIFTY": 25
-    }
-  },
-  "executors": {
-    "zerodha": {
-      "exchange": "NFO",
-      "product": "MIS",
-      "variety": "regular"
-    },
-    "binance": {
-      "test_mode": true,
-      "time_in_force": "GTC"
-    },
-    "upstox": {
-      "exchange": "NSE_FO",
-      "product": "I",
-      "validity": "DAY",
-      "instrument_map": {}
-    }
-  },
-  "quantity": "100",
+  "symbols": ["btcusdt"],
+
+  "market_close_time": "15:30",
+
   "trail": 0.03,
   "loss_stop_low": 0.96,
   "loss_stop_high": 1.06,
-  "market_close_time": "13:39",
+
   "default_quantity": 75,
-  "buy_quantity": 225,
-  "sell_quantity": 75,
-  "binance": {
-    "api_key": "your_binance_api_key",
-    "api_secret": "your_binance_secret",
-    "name_symbol": "NSE_FO|52859",
-    "testnet": false,
-    "stream_type": "markPrice",
-    "base_url": "https://fapi.binance.com",
-    "ws_url": "wss://fstream.binance.com/ws"
+  "quantities": {
+    "btcusdt":    1,
+    "NIFTY":     75,
+    "BANKNIFTY": 25
+  },
+
+  "execution": {
+    "delta_sell":          0.02,
+    "delta_buy":           0.04,
+    "max_retries":         3,
+    "retry_delay_seconds": 1
+  },
+
+  "credentials": {
+    "zerodha": {
+      "api_key":      "",
+      "api_secret":   "",
+      "access_token": ""
+    },
+    "binance": {
+      "api_key":    "",
+      "api_secret": ""
+    },
+    "upstox": {
+      "api_key":      "",
+      "access_token": ""
+    }
   }
 }

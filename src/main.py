@@ -43,8 +43,8 @@ def load_configurations():
         trading_config = ConfigManager()
         
         logger.info(f"System mode: {system_config.get('system.mode')}")
-        logger.info(f"Streamer type: {system_config.get('streamer.type')}")
-        logger.info(f"Executor type: {system_config.get('executor.type')}")
+        logger.info(f"Active streamer: {system_config.get_active_streamer()}")
+        logger.info(f"Active executor: {system_config.get_active_executor()}")
         
         logger.info("✅ Configurations loaded successfully")
         return system_config, trading_config

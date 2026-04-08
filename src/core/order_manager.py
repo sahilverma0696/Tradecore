@@ -29,29 +29,28 @@ class OrderManager(Subscriber, Publisher):
         # IPC file for live order data
         self._live_order_file = "data/live_order.json"
 
-        # Load trading configuration
+        # Load trading configuration via ConfigManager
         self._config_manager = ConfigManager()
-        self._trading_config = self._config_manager.get()
-        
+        self._reload_trading_config(self._config_manager.get())
+
+        # Re-read config on hot-reload so new trail/stops take effect next order
+        self._config_manager.register_watcher(self._reload_trading_config)
+
         self._logger.info("OrderManager initialized")
-        
-        # Subscribe to trading signal events - CRITICAL for receiving trading signals
+
         self.subscribe_to_event(EntrySignal, self.on_entry_signal)
-        
-        # this is proof: OrderManager & OrderObject
         self.subscribe_to_event(QuoteEvent, self._on_ltp_update)
-        
         self.subscribe_to_event(CandleGenerated, self._handle_update_candle)
-        self._logger.info(f"✅ OrderManager subscribed to EntrySignal and ExitSignal events")
-        
-        self.loss_stop_low = float(self._trading_config.get('loss_stop_low'))
-        self.loss_stop_high = float(self._trading_config.get('loss_stop_high'))
+        self._logger.info("OrderManager subscribed to EntrySignal, QuoteEvent, CandleGenerated")
       
-    # # this way is not in use  
-    # def register_handler(self, cb):
-    #     if callable(cb):
-    #         self._logger.debug(f"Registering handler {cb.__name__}")
-    #         self._handlers.append(cb)
+    def _reload_trading_config(self, config: dict) -> None:
+        """Extract and cache the values we need; called on init and hot-reload."""
+        self._trail        = float(config.get('trail', 0.03))
+        self._loss_stop_low  = float(config.get('loss_stop_low', 0.96))
+        self._loss_stop_high = float(config.get('loss_stop_high', 1.06))
+        # Resolve quantity: per-symbol > default_quantity (always a number)
+        self._quantities   = config.get('quantities', {})
+        self._default_qty  = int(config.get('default_quantity', 75))
     
     
     def _handle_entry_signal(self, event: EntrySignal):
@@ -74,16 +73,17 @@ class OrderManager(Subscriber, Publisher):
                 return
             
         # Create new order
+        quantity = int(self._quantities.get(symbol, self._default_qty))
         try:
             order = OrderObject(
                 name=symbol,
                 instrument=event.symbol,
-                trail=self._trading_config.get('trail'),
+                trail=self._trail,
                 side=side,
-                quantity=self._trading_config.get('quantity'),
+                quantity=quantity,
                 candle=event.candle,
-                loss_stop_low=self.loss_stop_low,
-                loss_stop_high=self.loss_stop_high
+                loss_stop_low=self._loss_stop_low,
+                loss_stop_high=self._loss_stop_high
             )
             
         except Exception as e:
