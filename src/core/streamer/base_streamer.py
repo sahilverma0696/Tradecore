@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 import asyncio
 from datetime import datetime
 
@@ -10,94 +10,98 @@ from src.core.thread_manager import ThreadManager, ThreadPoolType
 
 class BaseStreamer(Publisher, ABC):
     """
-    Abstract base class for all market data streamers with thread pool support.
-    
-    Provides core functionality:
-    - Event bus integration via Publisher mixin
-    - Lifecycle management (start/stop)
-    - Quote normalization
-    - Thread pool integration for async operations
+    Abstract base for all market data streamers.
+
+    Subclasses must implement:
+        _setup_connection()
+        _run_connection()
+        _cleanup_connection()
+        _normalize_raw_data(raw_data, symbol) -> QuoteEvent | None
+
+    Optionally override:
+        _run_connection_async()   – async streaming path
     """
-    
+
     def __init__(self, symbols: List[str], name: str = None):
-        super().__init__()  # Initialize Publisher mixin
+        super().__init__()
         self.symbols = symbols
         self.name = name or self.__class__.__name__
         self._logger = get_logger(self.name)
         self._is_running = False
-        self._connection_thread = None
-        
-        # Thread management
+        self._connection_future = None
         self._thread_manager = ThreadManager()
-        self._async_tasks = []
-        
-        self._logger.info(f"{self.name} initialized with symbols: {symbols}")
-    
+        self._logger.info(f"{self.name} initialised with {len(symbols)} symbol(s)")
+
+    # ------------------------------------------------------------------
+    # Lifecycle
+    # ------------------------------------------------------------------
+
     def start(self):
-        """Start the streaming service using thread pools."""
         if self._is_running:
-            self._logger.warning(f"{self.name} is already running")
+            self._logger.warning(f"{self.name} already running")
             return
-        
-        self._logger.info(f"Starting {self.name}...")
         self._is_running = True
-        
         try:
-            # Setup connection
             self._setup_connection()
-            
-            # Submit connection task to streamer thread pool
-            connection_future = self._thread_manager.submit_task(
-                ThreadPoolType.STREAMER,
-                self._run_connection_wrapper
+            self._connection_future = self._thread_manager.submit_task(
+                ThreadPoolType.STREAMER, self._run_connection_wrapper
             )
-            
-            # Store future for monitoring
-            self._connection_future = connection_future
-            
-            self._logger.info(f"{self.name} started successfully")
+            self._logger.info(f"{self.name} started")
         except Exception as e:
-            self._logger.error(f"Failed to start {self.name}: {e}")
             self._is_running = False
+            self._logger.error(f"{self.name} start failed: {e}")
             raise
-    
-    def start_async(self) -> asyncio.Future:
-        """Start streaming with async support."""
+
+    def start_async(self) -> Optional[asyncio.Future]:
         if self._is_running:
-            self._logger.warning(f"{self.name} is already running")
+            self._logger.warning(f"{self.name} already running")
             return None
-        
-        self._logger.info(f"Starting {self.name} with async support...")
         self._is_running = True
-        
         try:
-            # Setup connection
             self._setup_connection()
-            
-            # Submit async connection task
-            if hasattr(self, '_run_connection_async'):
-                future = self._thread_manager.submit_async_task(
-                    ThreadPoolType.STREAMER,
-                    self._run_connection_async()
-                )
-            else:
-                # Fallback to sync version in thread pool
-                future = self._thread_manager.submit_task(
-                    ThreadPoolType.STREAMER,
-                    self._run_connection_wrapper
-                )
-            
-            self._connection_future = future
-            self._logger.info(f"{self.name} started successfully with async support")
-            return future
-            
+            self._connection_future = self._thread_manager.submit_async_task(
+                ThreadPoolType.STREAMER, self._run_connection_async()
+            )
+            self._logger.info(f"{self.name} started (async)")
+            return self._connection_future
         except Exception as e:
-            self._logger.error(f"Failed to start {self.name} async: {e}")
             self._is_running = False
+            self._logger.error(f"{self.name} async start failed: {e}")
             raise
-    
+
+    def stop(self):
+        if not self._is_running:
+            return
+        self._logger.info(f"Stopping {self.name}...")
+        self._is_running = False
+        try:
+            self._cleanup_connection()
+        except Exception as e:
+            self._logger.error(f"Error during {self.name} cleanup: {e}")
+        self._logger.info(f"{self.name} stopped")
+
+    def is_running(self) -> bool:
+        return self._is_running
+
+    # ------------------------------------------------------------------
+    # Publishing
+    # ------------------------------------------------------------------
+
+    def publish_quote(self, event: QuoteEvent):
+        """Submit a QuoteEvent to the EVENT_BUS pool for dispatch."""
+        def _task():
+            try:
+                self.publish_event(event)
+            except Exception as e:
+                self._logger.error(f"Error publishing quote for {event.instrument}: {e}")
+
+        self._thread_manager.submit_task(ThreadPoolType.EVENT_BUS, _task)
+
+    # ------------------------------------------------------------------
+    # Internal wrappers
+    # ------------------------------------------------------------------
+
     def _run_connection_wrapper(self):
-        """Wrapper for connection that handles exceptions."""
         try:
             self._run_connection()
         except Exception as e:
@@ -106,109 +110,36 @@ class BaseStreamer(Publisher, ABC):
             raise
         finally:
             self._logger.info(f"{self.name} connection ended")
-    
-    def stop(self):
-        """Stop the streaming service."""
-        if not self._is_running:
-            return
-        
-        self._logger.info(f"Stopping {self.name}...")
-        self._is_running = False
-        
-        try:
-            # Cancel connection future if running
-            if hasattr(self, '_connection_future') and self._connection_future:
-                self._connection_future.cancel()
-            
-            # Cancel any async tasks
-            for task in self._async_tasks:
-                if not task.done():
-                    task.cancel()
-            self._async_tasks.clear()
-            
-            self._cleanup_connection()
-            self._logger.info(f"{self.name} stopped successfully")
-        except Exception as e:
-            self._logger.error(f"Error stopping {self.name}: {e}")
-    
-    def is_running(self) -> bool:
-        """Check if streamer is running."""
-        return self._is_running
-    
-    def publish_quote(self, event):
-        """
-        Publish a normalized quote as QuoteEvent using event bus thread pool.
-        """
-        def _publish_quote_task():
-            try:
-                self.publish_event(event)
-                # Use correct attribute names for QuoteEvent
-                # self._logger.debug(f"Published quote for {event.instrument}: LTP={event.ltp}, LTQ={event.ltq}")
 
-            except Exception as e:
-                # Use correct attribute names for QuoteEvent
-                self._logger.error(f"Error publishing quote for {getattr(event, 'instrument', 'unknown')}: {e}")
+    async def _run_connection_async(self):
+        """Default async path: runs sync connection in a thread executor."""
+        loop = asyncio.get_running_loop()
+        await loop.run_in_executor(None, self._run_connection)
 
-        # Submit quote publishing to event bus thread pool
-        self._thread_manager.submit_task(ThreadPoolType.EVENT_BUS, _publish_quote_task)
-    
-    async def publish_quote_async(self, symbol: str, ltp: float, volume: int = 0, 
-                                 bid: float = 0, ask: float = 0, raw_data: Dict[str, Any] = None):
-        """Async version of quote publishing."""
-        try:
-            quote_event = QuoteEvent(
-                timestamp=datetime.now(),
-                source=self.name,
-                instrument=symbol,
-                name=symbol,
-                ltp=ltp,
-                ltq=volume
-            )
-            
-            # Publish in current event loop
-            self.publish_event(quote_event)
-            # self._logger.debug(f"Published quote async for {symbol}: LTP={ltp}, LTQ={volume}")
-            
-        except Exception as e:
-            self._logger.error(f"Error publishing quote async for {symbol}: {e}")
+    # ------------------------------------------------------------------
+    # Status
+    # ------------------------------------------------------------------
 
-    
     def get_status(self) -> Dict[str, Any]:
-        """Get current status of the streamer."""
         return {
             'name': self.name,
             'is_running': self._is_running,
             'symbols': self.symbols,
             'thread_pool_stats': self._thread_manager.get_pool_stats().get('streamer', {}),
-            'active_async_tasks': len([t for t in self._async_tasks if not t.done()])
         }
-    
-    # Abstract methods - subclasses must implement these
-    @abstractmethod
-    def _setup_connection(self):
-        """Setup the connection to the data source."""
-        pass
-    
-    @abstractmethod
-    def _run_connection(self):
-        """Run the main connection loop."""
-        pass
-    
-    @abstractmethod
-    def _cleanup_connection(self):
-        """Clean up the connection."""
-        pass
+
+    # ------------------------------------------------------------------
+    # Abstract interface
+    # ------------------------------------------------------------------
 
     @abstractmethod
-    def _normalize_raw_data(self, raw_data: Dict[str, Any], symbol: str) -> QuoteEvent:
-        """Normalize raw data to QuoteEvent event."""
-        pass
-    
-    
-    # Optional async methods - subclasses can implement these
-    async def _run_connection_async(self):
-        """Optional async version of connection loop."""
-        # Default implementation runs sync version in executor
-        await asyncio.get_event_loop().run_in_executor(None, self._run_connection)
-        # Default implementation runs sync version in executor
-        await asyncio.get_event_loop().run_in_executor(None, self._run_connection)
+    def _setup_connection(self): ...
+
+    @abstractmethod
+    def _run_connection(self): ...
+
+    @abstractmethod
+    def _cleanup_connection(self): ...
+
+    @abstractmethod
+    def _normalize_raw_data(self, raw_data: Dict[str, Any], symbol: str) -> Optional[QuoteEvent]: ...

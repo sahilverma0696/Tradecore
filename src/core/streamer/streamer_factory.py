@@ -1,166 +1,163 @@
-"""Factory for creating different types of market data streamers."""
-from typing import Dict, Any, List, Union
+"""Factory for creating market data streamers."""
+from typing import Any, Dict, List, Union
+
 from src.logger_factory import get_logger
 from .base_streamer import BaseStreamer
 
 
 class StreamerFactory:
-    """Factory class for creating market data streamers."""
-    
-    _streamer_registry = {}
-    
+    """
+    Registry + factory for streamer creation.
+
+    Streamers are registered at module import time. Creation reads
+    credentials from trading_config.json so system_config only carries
+    connection/behaviour settings (reconnect, timeout, etc.).
+    """
+
+    _registry: Dict[str, type] = {}
+    _logger = get_logger("StreamerFactory")
+
     @classmethod
-    def register_streamer(cls, streamer_type: str, streamer_class):
-        """Register a streamer class with the factory."""
-        if not issubclass(streamer_class, BaseStreamer):
-            raise ValueError("Streamer class must inherit from BaseStreamer")
-        cls._streamer_registry[streamer_type.lower()] = streamer_class
-    
+    def register(cls, name: str, klass):
+        if not issubclass(klass, BaseStreamer):
+            raise ValueError(f"{klass} must subclass BaseStreamer")
+        cls._registry[name.lower()] = klass
+        cls._logger.info(f"Registered streamer: {name}")
+
+    # kept for backward-compat with old call sites
+    register_streamer = register
+
     @classmethod
-    def create_streamer(cls, streamer_type: str, symbols: List[Union[str, int]], 
-                       config: Dict[str, Any] = None) -> BaseStreamer:
+    def create_streamer(
+        cls,
+        streamer_type: str,
+        symbols: List[Union[str, int]],
+        config: Dict[str, Any] = None,
+    ) -> BaseStreamer:
         """
-        Create a streamer instance based on type and configuration.
-        
-        Args:
-            streamer_type: Type of streamer ('zerodha', 'offline', 'binance')
-            symbols: List of symbols to stream
-            config: Configuration dictionary for the streamer
-            
-        Returns:
-            BaseStreamer: Configured streamer instance
+        Create a streamer.
+
+        config  – the streamer-type block from system_config
+                  (e.g. system_config.streamer.configs.binance)
+        Credentials for live brokers are read from trading_config.json
+        under credentials.{type}.
         """
-        logger = get_logger("StreamerFactory")
+        key = streamer_type.lower()
+        if key not in cls._registry:
+            raise ValueError(
+                f"Unknown streamer '{streamer_type}'. "
+                f"Available: {list(cls._registry)}"
+            )
+
         config = config or {}
-        
-        streamer_type = streamer_type.lower()
-        
-        if streamer_type not in cls._streamer_registry:
-            available = list(cls._streamer_registry.keys())
-            raise ValueError(f"Unknown streamer type: {streamer_type}. Available: {available}")
-        
-        streamer_class = cls._streamer_registry[streamer_type]
-        
+        klass  = cls._registry[key]
+
+        # Read credentials from trading config (not from system config)
+        creds = cls._get_credentials(key)
+
         try:
-            # Create streamer based on type with appropriate configuration
-            if streamer_type == 'offline':
-                return cls._create_offline_streamer(streamer_class, symbols, config)
-            elif streamer_type == 'zerodha':
-                return cls._create_zerodha_streamer(streamer_class, symbols, config)
-            elif streamer_type == 'binance':
-                return cls._create_binance_streamer(streamer_class, symbols, config)
-            elif streamer_type == 'upstox':
-                return cls._create_upstox_streamer(streamer_class, symbols, config)
-            else:
-                # Generic creation for other streamers
-                return streamer_class(symbols=symbols, **config)
-                
+            return cls._build(key, klass, symbols, config, creds)
         except Exception as e:
-            logger.error(f"Failed to create {streamer_type} streamer: {e}")
+            cls._logger.error(f"Failed to create {streamer_type} streamer: {e}")
             raise
-    
+
     @classmethod
-    def _create_offline_streamer(cls, streamer_class, symbols: List[Union[str, int]], 
-                                config: Dict[str, Any]):
-        """Create offline streamer with specific configuration."""
-        str_symbols = [str(s) for s in symbols]
-        return streamer_class(
-            symbols=str_symbols,
-            base_price=config.get('base_price', 18500.0),
-            tick_interval=config.get('tick_interval', 1.0)
-        )
-    
+    def _build(cls, key, klass, symbols, config, creds):
+        str_syms = [str(s) for s in symbols]
+        int_syms = []
+        try:
+            int_syms = [int(s) for s in symbols]
+        except (ValueError, TypeError):
+            pass
+
+        if key == "offline":
+            return klass(
+                symbols=str_syms,
+                base_price=config.get("base_price", 18500.0),
+                tick_interval=config.get("tick_interval", 1.0),
+            )
+
+        if key == "binance":
+            return klass(
+                symbols=str_syms,
+                reconnect_attempts=config.get("reconnect_attempts", 5),
+                reconnect_delay=config.get("reconnect_delay", 2.0),
+                stream_timeout=config.get("stream_timeout", 60),
+                testnet=config.get("testnet", False),
+            )
+
+        if key == "zerodha":
+            streamer = klass(
+                symbols=int_syms or str_syms,
+                api_key=creds.get("api_key", ""),
+                access_token=creds.get("access_token", ""),
+                name_symbol=config.get("name_symbol", "ZERODHA"),
+            )
+            # init_kite is called here if access_token present
+            if creds.get("access_token"):
+                streamer.init_kite(creds["access_token"])
+            return streamer
+
+        if key == "upstox":
+            return klass(
+                symbols=str_syms,
+                access_token=creds.get("access_token", ""),
+                name_symbol=config.get("name_symbol", "UPSTOX"),
+            )
+
+        # Generic fallback for custom/registered streamers
+        return klass(symbols=str_syms, **config)
+
     @classmethod
-    def _create_zerodha_streamer(cls, streamer_class, symbols: List[Union[str, int]], 
-                                config: Dict[str, Any]):
-        """Create Zerodha streamer with specific configuration."""
-        int_symbols = [int(s) for s in symbols]
-        return streamer_class(
-            symbols=int_symbols,
-            api_key=config.get('api_key'),
-            api_secret=config.get('api_secret'),
-            name_symbol=config.get('name_symbol', 'UNKNOWN'),
-            paper_trade=config.get('paper_trade', True)
-        )
-    
+    def _get_credentials(cls, broker: str) -> Dict[str, Any]:
+        try:
+            from src.config_manager import ConfigManager
+            return ConfigManager().get_value(f"credentials.{broker}") or {}
+        except Exception:
+            return {}
+
     @classmethod
-    def _create_binance_streamer(cls, streamer_class, symbols: List[Union[str, int]], 
-                                config: Dict[str, Any]):
-        """Create Binance streamer with specific configuration."""
-        str_symbols = [str(s) for s in symbols]
-        
-        # Pass all relevant config parameters to BinanceStreamer
-        return streamer_class(
-            symbols=str_symbols,
-            name_symbol=config.get('name_symbol'),
-            reconnect_attempts=config.get('reconnect_attempts', 3),
-            reconnect_delay=config.get('reconnect_delay', 5.0),
-            stream_timeout=config.get('stream_timeout', 60),
-            ping_interval=config.get('ping_interval', 180),
-            testnet=config.get('testnet', False)
-        )
-        
-    @classmethod
-    def _create_upstox_streamer(cls, streamer_class, symbols: List[Union[str, int]], 
-                                config: Dict[str, Any]):
-        """Create Upstox streamer with specific configuration."""
-        str_symbols = [str(s) for s in symbols]
-        
-        # Pass all relevant config parameters to UpstoxStreamer
-        return streamer_class(
-            symbols=str_symbols,
-            access_token=config.get('access_token'),
-            name_symbol=config.get('name_symbol', 'UPSTOX')
-        )
-    
+    def available(cls) -> List[str]:
+        return list(cls._registry)
+
+    # backward-compat alias
     @classmethod
     def get_available_streamers(cls) -> List[str]:
-        """Get list of available streamer types."""
-        return list(cls._streamer_registry.keys())
-    
+        return cls.available()
+
     @classmethod
     def is_streamer_available(cls, streamer_type: str) -> bool:
-        """Check if a streamer type is available."""
-        return streamer_type.lower() in cls._streamer_registry
+        return streamer_type.lower() in cls._registry
 
 
-# Register built-in streamers
-def _register_built_in_streamers():
-    """Register all built-in streamer types."""
-    logger = get_logger("StreamerFactory")
-    
-    # Register Offline streamer
+# ---------------------------------------------------------------------------
+# Auto-register built-in streamers
+# ---------------------------------------------------------------------------
+
+def _register_builtins():
     try:
         from .offline_streamer import OfflineStreamer
-        StreamerFactory.register_streamer('offline', OfflineStreamer)
-        logger.info("Registered OfflineStreamer")
-    except ImportError as e:
-        logger.warning(f"Could not register OfflineStreamer: {e}")
-    
-    # Register Zerodha streamer
+        StreamerFactory.register("offline", OfflineStreamer)
+    except Exception as e:
+        get_logger("StreamerFactory").warning(f"OfflineStreamer unavailable: {e}")
+
     try:
-        from src.core.streamer.zerodha_streamer import ZerodhaStreamer
-        StreamerFactory.register_streamer('zerodha', ZerodhaStreamer)
-        logger.info("Registered ZerodhaStreamer")
-    except ImportError as e:
-        logger.debug(f"ZerodhaStreamer not available: {e}")
-    
-    # Register Binance streamer (from core.streamer directory)
+        from .binance_streamer import BinanceStreamer
+        StreamerFactory.register("binance", BinanceStreamer)
+    except Exception as e:
+        get_logger("StreamerFactory").debug(f"BinanceStreamer unavailable: {e}")
+
     try:
-        from src.core.streamer.binance_streamer import BinanceStreamer
-        StreamerFactory.register_streamer('binance', BinanceStreamer)
-        logger.info("Registered BinanceStreamer")
-    except ImportError as e:
-        logger.debug(f"BinanceStreamer not available: {e}")
-    
-    # Register Upstox streamer (if available)
+        from .zerodha_streamer import ZerodhaStreamer
+        StreamerFactory.register("zerodha", ZerodhaStreamer)
+    except Exception as e:
+        get_logger("StreamerFactory").debug(f"ZerodhaStreamer unavailable: {e}")
+
     try:
-        from src.core.streamer.upstox_streamer import UpstoxStreamer
-        StreamerFactory.register_streamer('upstox', UpstoxStreamer)
-        logger.info("Registered UpstoxStreamer")
-    except ImportError as e:
-        logger.debug(f"UpstoxStreamer not available: {e}")
+        from .upstox_streamer import UpstoxStreamer
+        StreamerFactory.register("upstox", UpstoxStreamer)
+    except Exception as e:
+        get_logger("StreamerFactory").debug(f"UpstoxStreamer unavailable: {e}")
 
 
-# Auto-register built-in streamers when module is imported
-_register_built_in_streamers()
+_register_builtins()
