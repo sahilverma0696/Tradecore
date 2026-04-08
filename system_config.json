@@ -17,7 +17,7 @@
     "system_workers": 2
   },
   "streamer": {
-    "active": "offline",
+    "active": "binance",
     "async_enabled": true,
     "configs": {
       "offline": {

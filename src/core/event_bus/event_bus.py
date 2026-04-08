@@ -11,6 +11,27 @@ from src.logger_factory import get_logger
 from .events import Event
 
 
+class _DatetimeEncoder(json.JSONEncoder):
+    """JSON encoder that converts datetime → ISO string."""
+    def default(self, obj):
+        if isinstance(obj, datetime):
+            return obj.isoformat()
+        return super().default(obj)
+
+
+def _deep_clean(obj: Any) -> Any:
+    """Recursively make obj JSON-safe: datetime→str, unknown→str."""
+    if isinstance(obj, datetime):
+        return obj.isoformat()
+    if isinstance(obj, dict):
+        return {k: _deep_clean(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [_deep_clean(v) for v in obj]
+    if isinstance(obj, (str, int, float, bool, type(None))):
+        return obj
+    return str(obj)
+
+
 class EventBus:
     """
     Thread-safe singleton pub-sub broker for the trading system.
@@ -63,9 +84,12 @@ class EventBus:
         self._ipc_enabled = True
         self._ipc_dir = "data"
         self._ipc_event_file = os.path.join(self._ipc_dir, "live_events.json")
+        self._ipc_events_log = os.path.join(self._ipc_dir, "live_events_log.json")
         self._quote_file = os.path.join(self._ipc_dir, "live_quotes.json")
         self._candle_file = os.path.join(self._ipc_dir, "live_candles.json")
         os.makedirs(self._ipc_dir, exist_ok=True)
+        self._events_log: deque = deque(maxlen=200)   # rolling buffer of last 200 events
+        self._events_log_lock = threading.Lock()
 
         self._quote_state: Dict[str, dict] = {}    # keyed by instrument
         self._candle_state: Dict[str, dict] = {}   # keyed by symbol
@@ -196,6 +220,7 @@ class EventBus:
             elif event_type == "CandleGenerated":
                 self._update_candle_state(event)
                 self._flush_candles()
+                self._write_general_event(event)  # heartbeat in event log
             else:
                 # Only non-tick events go to the general file
                 self._write_general_event(event)
@@ -268,37 +293,30 @@ class EventBus:
             "data": self._serialize_event(event),
         }
         self._atomic_json_write(self._ipc_event_file, payload)
+        # Also append to rolling log
+        with self._events_log_lock:
+            self._events_log.append(payload)
+            snapshot = list(self._events_log)
+        self._atomic_json_write(self._ipc_events_log, snapshot)
 
     @staticmethod
     def _atomic_json_write(path: str, data: Any) -> None:
-        """Write JSON atomically: write to .tmp then rename. Never corrupts."""
-        tmp = path + ".tmp"
+        """Write JSON atomically via unique tmp file → rename."""
+        # Use pid+thread id so concurrent writes don't collide on the same .tmp
+        tmp = f"{path}.{os.getpid()}.{threading.current_thread().ident}.tmp"
         with open(tmp, "w") as f:
-            json.dump(data, f, indent=2)
-        os.replace(tmp, path)   # POSIX-atomic; on Windows, also atomic in Python 3.3+
+            json.dump(data, f, indent=2, cls=_DatetimeEncoder)
+        os.replace(tmp, path)
 
     @staticmethod
     def _serialize_event(event: Event) -> dict:
-        """Serialize a dataclass event to a plain dict."""
+        """Serialize a dataclass event to a plain JSON-safe dict."""
         try:
             if dataclasses.is_dataclass(event):
                 raw = dataclasses.asdict(event)
             else:
-                raw = {
-                    k: v
-                    for k, v in vars(event).items()
-                    if not k.startswith("_")
-                }
-            # Convert datetime values to ISO strings
-            result = {}
-            for k, v in raw.items():
-                if isinstance(v, datetime):
-                    result[k] = v.isoformat()
-                elif isinstance(v, (str, int, float, bool, list, dict, type(None))):
-                    result[k] = v
-                else:
-                    result[k] = str(v)
-            return result
+                raw = {k: v for k, v in vars(event).items() if not k.startswith("_")}
+            return _deep_clean(raw)
         except Exception:
             return {"error": "serialization_failed"}
 
@@ -328,3 +346,17 @@ class EventBus:
     def list_event_types(self) -> List[str]:
         with self._sub_lock:
             return [cls.__name__ for cls in self._subscribers]
+
+    def get_wiring_map(self) -> dict:
+        """Return {EventType: [subscriber_name, ...]} for system introspection."""
+        result = {}
+        with self._sub_lock:
+            for event_cls, callbacks in self._subscribers.items():
+                names = []
+                for cb in callbacks:
+                    qualname = getattr(cb, "__qualname__", "")
+                    # e.g. "OrderManager._on_ltp_update" → "OrderManager"
+                    name = qualname.split(".")[0] if qualname else "unknown"
+                    names.append(name)
+                result[event_cls.__name__] = names
+        return result

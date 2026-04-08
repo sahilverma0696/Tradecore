@@ -7,6 +7,10 @@
   "loss_stop_low": 0.96,
   "loss_stop_high": 1.06,
 
+  "step_pct": 2.0,
+  "max_level_pct": 10.0,
+  "stoploss_pct": 2.0,
+
   "default_quantity": 75,
   "quantities": {
     "btcusdt":    1,

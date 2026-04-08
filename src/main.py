@@ -2,6 +2,7 @@
 import time
 import signal
 import sys
+import os
 from datetime import datetime
 from threading import Event
 
@@ -53,9 +54,45 @@ def load_configurations():
         logger.error(f"❌ Failed to load configurations: {e}")
         raise
 
+def _write_system_state():
+    """Write event wiring map + session info to IPC for sys_cli."""
+    try:
+        bus = EventBus()
+        wiring = bus.get_wiring_map()
+        system_config = SystemConfigManager()
+        state = {
+            "session_start": datetime.now().isoformat(),
+            "streamer":  system_config.get_active_streamer(),
+            "executor":  system_config.get_active_executor(),
+            "event_flows": {
+                event: {"subscribers": subs, "count": 0}
+                for event, subs in wiring.items()
+            },
+        }
+        import json
+        os.makedirs("data", exist_ok=True)
+        tmp = "data/live_system.json.tmp"
+        with open(tmp, "w") as f:
+            json.dump(state, f, indent=2)
+        os.replace(tmp, "data/live_system.json")
+    except Exception as e:
+        logger.debug(f"system state write error: {e}")
+
+
+def _clear_ipc_files():
+    """Wipe stale IPC files and leftover .tmp files from previous runs."""
+    import glob
+    for path in glob.glob("data/live_*.json") + glob.glob("data/live_*.json.*.tmp"):
+        try:
+            os.remove(path)
+        except OSError:
+            pass
+
+
 def initialize_foundation():
     """Initialize the system foundation: thread pools and event bus."""
     logger.info("🏗️ Initializing system foundation...")
+    _clear_ipc_files()
     
     # Step 1: Initialize thread pool system
     logger.info("1️⃣ Initializing thread pool system...")
@@ -220,6 +257,7 @@ def validate_system_wiring():
         )
 
     logger.info("All event flows connected – system ready to start")
+    _write_system_state()
 
 
 def start_system_components(components, system_config):

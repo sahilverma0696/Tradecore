@@ -28,7 +28,10 @@ class OrderObject(Publisher):
         
 
         # information from config and is in steps
-        self.quantity = quantity # array of step exit, these are constant values, not percentage
+        self.quantity = quantity
+        self.total_quantity = quantity
+        self.filled_quantity = 0
+        self.current_step_idx = 0
         
         # types of stops
         # profit stop
@@ -99,34 +102,18 @@ class OrderObject(Publisher):
             
         if self.net_zero_state == False and self._is_price_bounds(0.03):
             self.net_zero_state = True
-            self.net_zero_stop = self.const_entry_price * (0.97 if self.side == "BUY" else 1.03)
+            self.net_zero_stop = self.const_entry_price * (0.97 if self.const_side == "BUY" else 1.03)
 
         
 
     def set_ltp(self, ltp, timestamp=None):
-        """Set LTP and sends exit event if exit conditions are met."""
-        
-        # Update order state
+        """Set LTP, check exits, return exit_info dict if triggered else None."""
         self.ltp = ltp
         self._set_stops()
-        # Check for exit conditions using exit manager
         exit_info = self.exit_manager.check(self)
         if exit_info:
-            self.state = ORDERSTATE.CLOSE   
-        #     orderEvent = OrderEvent()
-        #     orderEvent.order_id = self.id
-        #     orderEvent.timestamp = self.timestamp
-        #     orderEvent.source = self.__class__.__name__
-        #     orderEvent.instrument = self.const_instrument
-        #     orderEvent.side = self.const_side #TODO: opposite side
-        #     orderEvent.price = ltp
-        #     orderEvent.strategy = "EXIT triggered"
-        #     orderEvent.type = "EXIT"
-        #     orderEvent.candle = self.current_candle
-        #     orderEvent.exit_info = exit_info
-        #     orderEvent.timestamp = datetime.now()
-        #     self.event_bus.publish(orderEvent)
-
+            self.state = ORDERSTATE.CLOSE
+            return exit_info
         else:
             self._update_min_max_price(ltp)
             self._update_performance_metrics()
@@ -143,10 +130,10 @@ class OrderObject(Publisher):
             'entry_price': self.const_entry_price,
             'min_price': self.min_price,
             'max_price': self.max_price,
-            'current_step_idx': 0,
+            'current_step_idx': self.current_step_idx,
             'current_trigger': self.trigger,
             'quantity': self.quantity,
-            'step': 0,
+            'step': self.current_step_idx,
             'current_profit_percentage': self.current_profit_percentage,
             'retreat': self.retreat
         }
@@ -175,6 +162,10 @@ class OrderObject(Publisher):
 
     def get_current_trigger(self):
         return self.trigger
+
+    def get_current_step_idx(self): return self.current_step_idx
+    def get_current_step(self): return float('inf')  # no step config; step exit never triggers
+    def get_current_quantity(self): return self.quantity
     
     
     # ...existing code for all other getters...

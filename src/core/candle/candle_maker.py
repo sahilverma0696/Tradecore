@@ -52,7 +52,7 @@ class CandleMaker(Publisher, Subscriber):
         volume = event.ltq or 0
 
         candle_time = timestamp.replace(second=0, microsecond=0)
-        candle_time = candle_time.replace(minute=(candle_time.minute // 3) * 3) # TODO: read from system config
+        candle_time = candle_time.replace(minute=(candle_time.minute // self.timeframe) * self.timeframe)
 
         current = self._current.get(symbol)
 

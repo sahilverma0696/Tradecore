@@ -5,6 +5,7 @@ from collections import defaultdict
 from dataclasses import dataclass, asdict
 from typing import Dict, List, Tuple, Optional, Any
 from src.core.event_bus import Subscriber, Publisher, CandleGenerated, EntrySignal, ExitSignal
+from src.core.event_bus.events import OrderEvent
 from src.logger_factory import get_logger
 
 
@@ -22,6 +23,7 @@ class VwapStrategy(Subscriber, Publisher):
         
         # Subscribe to candle events
         self.subscribe_to_event(CandleGenerated, self.on_candle_generated)
+        self.subscribe_to_event(OrderEvent, self._on_order_event)
         self.logger.info(f"✅ VwapStrategy subscribed to CandleGenerated events")
 
     def on_candle_generated(self, event: CandleGenerated):
@@ -44,14 +46,14 @@ class VwapStrategy(Subscriber, Publisher):
             self.logger.warning(f"VWAP missing in candle for {symbol} @ {event.timestamp}")
             return
 
-        # if symbol in self.positions:
-        #     return  # Only generate one entry per symbol
-
         # Entry logic - publish entry signal event
+        existing = self.positions.get(symbol)
         if open_price < vwap and close_price > vwap:
-            self._trigger_entry_signal(symbol, 'BUY', close_price, event, vwap)
+            if not existing or existing.get('side') != 'BUY':
+                self._trigger_entry_signal(symbol, 'BUY', close_price, event, vwap)
         elif open_price > vwap and close_price < vwap:
-            self._trigger_entry_signal(symbol, 'SELL', close_price, event, vwap)
+            if not existing or existing.get('side') != 'SELL':
+                self._trigger_entry_signal(symbol, 'SELL', close_price, event, vwap)
 
     def _trigger_entry_signal(self, symbol, side, price, event: CandleGenerated, vwap):
         entry_signal_data = {
@@ -77,6 +79,10 @@ class VwapStrategy(Subscriber, Publisher):
             candle=event
         )
         self.publish_event(entry_event)
+
+    def _on_order_event(self, event: OrderEvent):
+        if event.type in ('FULL', 'SWITCH') and event.instrument in self.positions:
+            del self.positions[event.instrument]
 
     def get_active_positions(self) -> Dict[str, dict]:
         return self.positions

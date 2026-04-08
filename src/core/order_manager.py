@@ -150,14 +150,23 @@ class OrderManager(Subscriber, Publisher):
                 self.update_ltp(event)
 
     def update_ltp(self, event: QuoteEvent):
-        """Update LTP and check for exits"""
-        if event.instrument in self._orders:
-            order = self._orders[event.instrument]
-            # OrderObject now handles exit logic internally
-            order.set_ltp(event.ltp, event.timestamp)
-            
-            # Update live order IPC file when LTP changes    
-            self._write_live_order_data()
+        """Update LTP and check for exits."""
+        if event.instrument not in self._orders:
+            return
+        order = self._orders[event.instrument]
+        if not order or order.state != ORDERSTATE.OPEN:
+            return
+
+        exit_info = order.set_ltp(event.ltp, event.timestamp)
+
+        if order.state == ORDERSTATE.CLOSE:
+            reason     = (exit_info or {}).get('exit_reason', 'UNKNOWN') if isinstance(exit_info, dict) else 'UNKNOWN'
+            exit_price = (exit_info or {}).get('exit_price', event.ltp)   if isinstance(exit_info, dict) else event.ltp
+            self._order_logger.log_exit(order, reason, exit_price)
+            del self._orders[event.instrument]
+            self._logger.info(f"Order closed: {event.instrument}  reason={reason}")
+
+        self._write_live_order_data()
 
 
     def update_candle(self, symbol: str, candle: CandleGenerated):

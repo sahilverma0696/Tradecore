@@ -2,6 +2,11 @@
 import json
 import ssl
 import time
+try:
+    import certifi
+    _SSL_OPT = {"ca_certs": certifi.where()}
+except ImportError:
+    _SSL_OPT = {"cert_reqs": ssl.CERT_NONE}
 from datetime import datetime
 from typing import List, Dict, Any, Optional
 
@@ -58,7 +63,7 @@ class BinanceStreamer(BaseStreamer):
                 break
             try:
                 self._logger.info(f"WebSocket connect attempt {attempt + 1}/{self.reconnect_attempts}")
-                self._ws.run_forever()
+                self._ws.run_forever(sslopt=_SSL_OPT)
                 if not self._is_running:
                     break           # clean stop requested
             except Exception as e:
