@@ -1,217 +1,198 @@
-from datetime import datetime
-from typing import Optional, Dict, Any
-from src.core.order_object import OrderObject
+from typing import Optional, Dict, Any, Tuple, TYPE_CHECKING
+from src.core.event_bus.events import OrderEvent
+from src.core.event_bus.mixins import Publisher
 from src.logger_factory import get_logger
+from src.time_control import TimeChecker
+from src.config_manager import ConfigManager
+from src.global_enum import *
+if TYPE_CHECKING:
+    from src.core.order_object import OrderObject
 
 
-class ExitManager:
+class ExitManager(Publisher):
     """
-    Exit management library for order objects.
-    Works on trailing stops, retrieval exits, and market close exits.
-    
-    has just one function check_exit:
-        - checks on profit exit
-            - step exit
-        - checks on trigger exit
-            - retrieval trigger is triggered
-            - zero stop is triggered
-            - hard stop is triggered
-        - checks on market close exit
+    Peak-retrace-to-last-cleared-level exit logic (mirrors backtest algorithm).
+
+    Exit rules (checked in priority order):
+      1. HARD_STOP      — price moves stoploss_pct% against entry  → exit at stop price
+      2. MAX_LEVEL      — price reaches max_level_pct from entry   → exit at that level price
+      3. RETRACE        — price cleared level N, then retraces to N → exit at level N price
+      4. MARKET_CLOSE   — current IST time >= market_close_time    → exit at LTP
+
+    Levels (example step_pct=2, max_level_pct=10): [2, 4, 6, 8, 10]
+    A level is "cleared" when the peak move has exceeded it.
+    Retrace exit fires when LTP crosses back through the highest cleared level price.
     """
-    
+
     def __init__(self, name: str = "ExitManager"):
+        super().__init__()
         self.logger = get_logger(name)
-        self.dust_value = 0.01
-        
-    # step based exits
-    def _check_step_exit(self, order: OrderObject) -> Optional[Dict[str, Any]]:
-        """
-        Check if step change triggers partial profit exit.
+        self.time = TimeChecker()
 
-        Args:
-            order: OrderObject containing order state information
+        cfg = ConfigManager()
+        self._step_pct         = float(cfg.get_value('step_pct')         or 2.0)
+        self._max_level_pct    = float(cfg.get_value('max_level_pct')    or 10.0)
+        self._stoploss_pct     = float(cfg.get_value('stoploss_pct')     or 2.0)
+        self._market_close_time = cfg.get_value('market_close_time')     or '15:30'
 
-        """
+        self._levels = self._build_levels()
+        self.logger.info(
+            f"{name} ready — levels={self._levels}  "
+            f"stop={self._stoploss_pct}%  close={self._market_close_time}"
+        )
 
-        current_step_idx = order.get_current_step_idx()
-        
-        ltp = order.get_ltp()
-        side = order.get_side()
-        
-        entry_price = order.get_entry_price()
-        
-        #this is a decimal value, like 0.02 for 2%
-        step = order.get_current_step()
-        
-        #this is the value of this step trigger, based on side
-        step_exit_value = entry_price *(step*100) if side == "BUY" else entry_price *(1 - step*100)
-        
-        if( (side == "BUY" and ltp >= step_exit_value) or
-            (side == "SELL" and ltp <= step_exit_value) ):
-            # Step exit triggered
-            # values will be updated in order object
-            current_quantity = order.get_current_quantity()
-            order.total_quantity -= current_quantity
-            order.filled_quantity += current_quantity
-            order.remaining_quantity = order.total_quantity - order.filled_quantity
-            # TODO: make this increment safe
-            order.current_step_idx += 1
-            return self._create_exit_info(order, f'STEP_EXIT_{current_step_idx}', current_quantity, 'PARTIAL')
+    # ── Level helpers ────────────────────────────────────────────────────────
 
-        return None
+    def _build_levels(self):
+        """[step_pct, 2*step_pct, ..., max_level_pct]"""
+        levels, pct = [], self._step_pct
+        while pct <= self._max_level_pct + 1e-9:
+            levels.append(round(pct, 10))
+            pct += self._step_pct
+        return levels
 
-    def _check_profit_exit(self, order: OrderObject) -> Optional[Dict[str, Any]]:
-        """
-        Check if profit exit is triggered.
-        keeping this as a function in case future ways are added
-        """
-        # checks if step exit is triggered
-        return self._check_step_exit(order)
-
-
-    # trigger based exits
-    def _check_retrieval_trigger_exit(self, order: OrderObject) -> Optional[Dict[str, Any]]:
-        '''
-        Check if retrieval trigger exit is triggered.
-        '''
-        trigger = order.get_current_trigger() *100 # convert to percentage
-        side = order.get_side()
-        ltp = order.get_ltp()
-        max_price = order.get_max_price()
-        min_price = order.get_min_price()
-        difference = (max_price - ltp) if side == "BUY" else (ltp - min_price)
-        difference_percentage = (difference / max_price)*100 if side == "BUY" else (difference / min_price)*100
-        
-        if( difference_percentage >= trigger and trigger > 0):
-            remaining_quantity = order.get_remaining_quantity()
-            order.total_quantity = 0  # Set total quantity to 0 to indicate full exit
-            order.state = "CLOSED"
-            return self._create_exit_info(order, 'RETRIEVAL_TRIGGER', remaining_quantity, 'FULL')
-        return None
-
-    def _check_zero_stop_exit(self, order: OrderObject) -> Optional[Dict[str, Any]]:
-        '''
-        Check if zero stop exit is triggered.
-        '''
-        ltp = order.get_ltp()
-        entry_price = order.get_entry_price()
-        # this is around entry price, say within 0.1% of entry price
-        threshold = self.dust_value * entry_price  # 0.01 of entry price
-        if abs(ltp - entry_price) <= threshold:
-            return self._create_exit_info(order, 'ZERO_STOP')
-        return None
-
-    def _check_hard_stop_exit(self, order: OrderObject) -> Optional[Dict[str, Any]]:
-        '''
-        Check if hard stop exit is triggered.
-        '''
-        ltp = order.get_ltp()
-        entry_price = order.get_entry_price()
-        # this is in case of ltp is below 2% of entry price in BUY and above 2% in SELL
-        threshold = 0.02 * entry_price  # 2% of entry price
-        side = order.get_side()
-        if (side == "BUY" and ltp <= entry_price - threshold) or (side == "SELL" and ltp >= entry_price + threshold):
-            return self._create_exit_info(order, 'HARD_STOP')
-        return None
-
-    def _check_on_trigger_exit(self, order: OrderObject) -> Optional[Dict[str, Any]]:
-        # TODO: future, convert to enum based flags
-        """
-            Check if any trigger-based exit conditions are met.
-            
-            Returns:
-                Exit reason string if any trigger condition is met, else empty string.
-        """ 
-        
-        hard_stop = self._check_hard_stop_exit(order)
-        if hard_stop is not None:
-            return hard_stop
-        zero_stop = self._check_zero_stop_exit(order)
-        if zero_stop is not None:
-            return zero_stop
-        retrieval_trigger = self._check_retrieval_trigger_exit(order)
-        if retrieval_trigger is not None:
-            return retrieval_trigger
-        return None
-
-    # market close exit: to be implemented
-    def _check_market_close_exit(self, order: OrderObject) -> bool:
-        return False
-
-    def check(self, order: OrderObject) -> dict:
-        """
-        Check all exit conditions based on order state.
-        """
-        
-        # check trigger based exits
-        trigger = self._check_on_trigger_exit(order)
-        if trigger:
-            return trigger
-
-        # Check step-based exits
-        step_profit = self._check_profit_exit(order)
-        if step_profit:
-            return step_profit
-
-        # TODO: check market close exit
-
-        return None
-
-    def _create_exit_info(self, order: OrderObject, exit_reason: str, quantity: int, exit_type: str) -> Dict[str, Any]:
-        """Create standardized exit information dictionary."""
-        return {
-            'symbol': order.get('name'),
-            'exit_price': order.get('ltp'),
-            'exit_reason': exit_reason,
-            'exit_type': exit_type,
-            'quantity': quantity,
-        }
-    
-    # updates in order values should be calculated in OrderObject only, ExitManager just provides checks
-    def calculate_performance_metrics(self, order_state: Dict[str, Any]) -> Dict[str, float]:
-        """
-        Calculate performance metrics for the order.
-        
-        Args:
-            order_state: Dictionary containing order state information
-            
-        Returns:
-            Dictionary with calculated performance metrics
-        """
-        entry_price = order_state.get('entry_price', 0)
-        ltp = order_state.get('ltp', 0)
-        side = order_state.get('side', '')
-        min_price = order_state.get('min_price', 0)
-        max_price = order_state.get('max_price', 0)
-        
-        if not entry_price:
-            return {
-                'current_profit': 0.0,
-                'current_profit_percentage': 0.0,
-                'max_move_percentage': 0.0,
-                'min_move_percentage': 0.0,
-                'retreat': 0.0
-            }
-        
-        # Calculate metrics based on side
+    def _level_price(self, entry: float, level_pct: float, side: str) -> float:
+        """Exact price corresponding to level_pct% from entry."""
         if side == "BUY":
-            current_profit = ltp - entry_price
-            current_profit_percentage = (current_profit / entry_price) * 100
-            max_move_percentage = ((max_price - entry_price) / entry_price) * 100
-            min_move_percentage = ((min_price - entry_price) / entry_price) * 100
-        else:  # SELL
-            current_profit = entry_price - ltp
-            current_profit_percentage = (current_profit / entry_price) * 100
-            max_move_percentage = ((entry_price - min_price) / entry_price) * 100
-            min_move_percentage = ((entry_price - max_price) / entry_price) * 100
-        
-        # Calculate retreat (pullback from maximum favorable movement)
-        retreat = max_move_percentage - current_profit_percentage
-        
+            return entry * (1 + level_pct / 100)
+        return entry * (1 - level_pct / 100)
+
+    def _get_last_cleared_level(self, order: 'OrderObject') -> Optional[float]:
+        """
+        Highest level % that peak move has exceeded.
+        Derived from order's tracked max/min price — no extra state needed.
+        """
+        entry = order.get_entry_price()
+        side  = order.get_side()
+
+        if side == "BUY":
+            peak_pct = (order.get_max_price() - entry) / entry * 100
+        else:
+            peak_pct = (entry - order.get_min_price()) / entry * 100
+
+        cleared = None
+        for lvl in self._levels:
+            if peak_pct >= lvl:
+                cleared = lvl
+            else:
+                break
+        return cleared
+
+    # ── Exit checks — each returns (exit_price, reason) or (None, None) ─────
+
+    def _check_hard_stop(self, order: 'OrderObject') -> Tuple[Optional[float], Optional[str]]:
+        entry = order.get_entry_price()
+        ltp   = order.get_ltp()
+        side  = order.get_side()
+
+        if side == "BUY":
+            stop = entry * (1 - self._stoploss_pct / 100)
+            if ltp <= stop:
+                return stop, "HARD_STOP"
+        else:
+            stop = entry * (1 + self._stoploss_pct / 100)
+            if ltp >= stop:
+                return stop, "HARD_STOP"
+        return None, None
+
+    def _check_level_exit(self, order: 'OrderObject') -> Tuple[Optional[float], Optional[str]]:
+        entry = order.get_entry_price()
+        ltp   = order.get_ltp()
+        side  = order.get_side()
+
+        if side == "BUY":
+            move_pct = (ltp - entry) / entry * 100
+        else:
+            move_pct = (entry - ltp) / entry * 100
+
+        # 1. MAX level hit — immediate full exit at that level price
+        if move_pct >= self._max_level_pct:
+            exit_px = self._level_price(entry, self._max_level_pct, side)
+            return exit_px, f"MAX_LEVEL_{self._max_level_pct:.0f}pct"
+
+        # 2. Retrace to last cleared level
+        last_cleared = self._get_last_cleared_level(order)
+        if last_cleared is not None:
+            lvl_px  = self._level_price(entry, last_cleared, side)
+            retrace = (side == "BUY"  and ltp <= lvl_px) or \
+                      (side == "SELL" and ltp >= lvl_px)
+            if retrace:
+                return lvl_px, f"RETRACE_L{last_cleared:.0f}pct"
+
+        return None, None
+
+    def _check_market_close_exit(self, order: 'OrderObject') -> Tuple[Optional[float], Optional[str]]:
+        if self.time.now_ist() >= self._market_close_time:
+            return order.get_ltp(), "MARKET_CLOSE"
+        return None, None
+
+    # ── Public API ───────────────────────────────────────────────────────────
+
+    def check(self, order: 'OrderObject') -> Optional[bool]:
+        """
+        Run all exit checks in priority order.
+        Publishes OrderEvent and returns True if an exit is triggered, else None.
+        """
+        exit_px, reason = self._check_hard_stop(order)
+
+        if exit_px is None:
+            exit_px, reason = self._check_level_exit(order)
+
+        if exit_px is None:
+            exit_px, reason = self._check_market_close_exit(order)
+
+        if exit_px is None:
+            return None
+
+        order.state = ORDERSTATE.CLOSE
+        self.logger.info(
+            f"Exit [{reason}] {order.get_name()}  "
+            f"entry={order.get_entry_price():.4f}  exit={exit_px:.4f}  "
+            f"ltp={order.get_ltp():.4f}"
+        )
+
+        opposite_side = "SELL" if order.const_side == "BUY" else "BUY"
+        self.publish_event(OrderEvent(
+            order_id=order.id,
+            timestamp=order.last_update_time,
+            source=self.__class__.__name__,
+            instrument=order.const_instrument,
+            side=opposite_side,
+            price=exit_px,
+            strategy='VWAP',
+            type='FULL',
+            candle=order.current_candle,
+            meta_info={'exit_reason': reason, 'exit_price': exit_px},
+        ))
+        return {'exit_reason': reason, 'exit_price': exit_px}
+
+    def calculate_performance_metrics(self, order_state: Dict[str, Any]) -> Dict[str, float]:
+        """Calculate P&L and move metrics from order state dict."""
+        entry  = order_state.get('entry_price', 0)
+        ltp    = order_state.get('ltp', 0)
+        side   = order_state.get('side', '')
+        lo     = order_state.get('min_price', 0)
+        hi     = order_state.get('max_price', 0)
+
+        if not entry:
+            return {'current_profit': 0.0, 'current_profit_percentage': 0.0,
+                    'max_move_percentage': 0.0, 'min_move_percentage': 0.0, 'retreat': 0.0}
+
+        if side == "BUY":
+            profit     = ltp - entry
+            profit_pct = profit / entry * 100
+            max_pct    = (hi - entry) / entry * 100
+            min_pct    = (lo - entry) / entry * 100
+        else:
+            profit     = entry - ltp
+            profit_pct = profit / entry * 100
+            max_pct    = (entry - lo) / entry * 100
+            min_pct    = (entry - hi) / entry * 100
+
         return {
-            'current_profit': current_profit,
-            'current_profit_percentage': current_profit_percentage,
-            'max_move_percentage': max_move_percentage,
-            'min_move_percentage': min_move_percentage,
-            'retreat': retreat
+            'current_profit':            profit,
+            'current_profit_percentage': profit_pct,
+            'max_move_percentage':       max_pct,
+            'min_move_percentage':       min_pct,
+            'retreat':                   max_pct - profit_pct,
         }

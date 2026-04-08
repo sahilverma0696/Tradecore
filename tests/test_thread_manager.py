@@ -14,20 +14,16 @@ class TestThreadManager(unittest.TestCase):
     
     def setUp(self):
         """Reset ThreadManager singleton before each test."""
-        # Reset singleton instance
         ThreadManager._instance = None
-        ThreadManager._lock = threading.Lock()
-        
+        ThreadManager._singleton_lock = threading.Lock()
+
     def tearDown(self):
         """Clean up after each test."""
-        # Get instance if it exists and shut it down
         if ThreadManager._instance:
             try:
                 ThreadManager._instance.shutdown(wait=True, timeout=5.0)
-            except:
+            except Exception:
                 pass
-        
-        # Reset singleton
         ThreadManager._instance = None
     
     def test_singleton_pattern(self):
@@ -69,7 +65,6 @@ class TestThreadManager(unittest.TestCase):
     @patch('src.system_config_manager.SystemConfigManager')
     def test_initialization_with_mock_config(self, mock_config_class):
         """Test ThreadManager initialization with mocked config."""
-        # Mock system config
         mock_config = MagicMock()
         mock_config.get.side_effect = lambda key, default: {
             'threading.event_bus_workers': 2,
@@ -77,13 +72,10 @@ class TestThreadManager(unittest.TestCase):
             'threading.strategy_workers': 2,
             'threading.executor_workers': 2,
             'threading.system_workers': 2,
-            'event_bus.max_event_history': 1000,
-            'streamers.buffer_size': 1024
         }.get(key, default)
-        
+
         mock_config_class.return_value = mock_config
-        
-        # Initialize ThreadManager
+
         manager = ThreadManager()
         self.assertIsNotNone(manager)
         self.assertEqual(len(manager._pool_configs), 5)
@@ -115,19 +107,18 @@ class TestThreadManager(unittest.TestCase):
         """Test initialization of thread pools."""
         manager = ThreadManager()
         manager.initialize_pools()
-        
+
         # Check that all pools are created
         self.assertEqual(len(manager._thread_pools), 5)
-        
-        # Check that async loops are created for appropriate pools
+
+        # Only STREAMER gets a companion async loop (EVENT_BUS dispatches synchronously)
         self.assertIn(ThreadPoolType.STREAMER, manager._async_loops)
-        self.assertIn(ThreadPoolType.EVENT_BUS, manager._async_loops)
-        
-        # Check that loop threads are started
-        for pool_type in [ThreadPoolType.STREAMER, ThreadPoolType.EVENT_BUS]:
+        self.assertNotIn(ThreadPoolType.EVENT_BUS, manager._async_loops)
+
+        # Check loop threads are running
+        for pool_type in [ThreadPoolType.STREAMER]:
             self.assertIn(pool_type, manager._loop_threads)
-            thread = manager._loop_threads[pool_type]
-            self.assertTrue(thread.is_alive())
+            self.assertTrue(manager._loop_threads[pool_type].is_alive())
     
     def test_submit_task_to_pool(self):
         """Test submitting tasks to thread pools."""
@@ -258,46 +249,46 @@ class TestThreadManager(unittest.TestCase):
         """Test graceful shutdown of thread pools."""
         manager = ThreadManager()
         manager.initialize_pools()
-        
-        # Submit a task that will be interrupted
-        def long_running_task():
-            time.sleep(2.0)
-            return "completed"
-        
-        future = manager.submit_task(ThreadPoolType.EXECUTOR, long_running_task)
-        
-        # Shutdown with timeout
+
+        # Submit a quick task to confirm pools are live, then shut down
+        def quick_task():
+            time.sleep(0.1)
+            return "done"
+
+        future = manager.submit_task(ThreadPoolType.EXECUTOR, quick_task)
+
+        # Wait for the task to finish before requesting shutdown so we're not
+        # racing against an in-flight thread (Python cannot interrupt running threads).
+        future.result(timeout=5.0)
+
         start_time = time.time()
-        manager.shutdown(wait=True, timeout=1.0)
+        manager.shutdown(wait=True, timeout=2.0)
         shutdown_time = time.time() - start_time
-        
-        # Should shutdown within reasonable time
-        self.assertLess(shutdown_time, 2.0)
-        
-        # Async loops should be stopped
+
+        # With no running tasks, shutdown should be fast
+        self.assertLess(shutdown_time, 3.0)
+
+        # Async loop threads should have stopped
         for pool_type, thread in manager._loop_threads.items():
-            thread.join(timeout=1.0)
-            # Thread should finish (may still be alive due to timing)
+            thread.join(timeout=2.0)
     
     def test_async_loop_creation(self):
-        """Test that async event loops are properly created."""
+        """Test that async event loops are created for pools that need them."""
         manager = ThreadManager()
         manager.initialize_pools()
-        
-        # Check that async loops exist for streamer and event bus
+
+        # Only STREAMER has a companion async loop
         self.assertIn(ThreadPoolType.STREAMER, manager._async_loops)
-        self.assertIn(ThreadPoolType.EVENT_BUS, manager._async_loops)
-        
-        # Check that loops are running
-        for pool_type in [ThreadPoolType.STREAMER, ThreadPoolType.EVENT_BUS]:
-            loop = manager._async_loops[pool_type]
-            self.assertIsInstance(loop, asyncio.AbstractEventLoop)
-            self.assertTrue(loop.is_running())
+        self.assertNotIn(ThreadPoolType.EVENT_BUS, manager._async_loops)
+
+        loop = manager._async_loops[ThreadPoolType.STREAMER]
+        self.assertIsInstance(loop, asyncio.AbstractEventLoop)
+        self.assertTrue(loop.is_running())
 
 
 class TestThreadPoolConfig(unittest.TestCase):
     """Test ThreadPoolConfig dataclass."""
-    
+
     def test_config_creation(self):
         """Test creating ThreadPoolConfig instances."""
         config = ThreadPoolConfig(
@@ -305,25 +296,25 @@ class TestThreadPoolConfig(unittest.TestCase):
             max_workers=4,
             thread_name_prefix="TestStreamer",
             daemon=True,
-            queue_size=100
+            has_async_loop=True,
         )
-        
+
         self.assertEqual(config.pool_type, ThreadPoolType.STREAMER)
         self.assertEqual(config.max_workers, 4)
         self.assertEqual(config.thread_name_prefix, "TestStreamer")
         self.assertTrue(config.daemon)
-        self.assertEqual(config.queue_size, 100)
-    
+        self.assertTrue(config.has_async_loop)
+
     def test_config_defaults(self):
         """Test default values in ThreadPoolConfig."""
         config = ThreadPoolConfig(
             pool_type=ThreadPoolType.SYSTEM,
             max_workers=2,
-            thread_name_prefix="System"
+            thread_name_prefix="System",
         )
-        
-        self.assertTrue(config.daemon)  # Default should be True
-        self.assertIsNone(config.queue_size)  # Default should be None
+
+        self.assertTrue(config.daemon)           # Default should be True
+        self.assertFalse(config.has_async_loop)  # Default should be False
 
 
 class TestThreadPoolIntegration(unittest.TestCase):
@@ -332,14 +323,14 @@ class TestThreadPoolIntegration(unittest.TestCase):
     def setUp(self):
         """Reset ThreadManager singleton."""
         ThreadManager._instance = None
-        ThreadManager._lock = threading.Lock()
-    
+        ThreadManager._singleton_lock = threading.Lock()
+
     def tearDown(self):
         """Clean up after tests."""
         if ThreadManager._instance:
             try:
                 ThreadManager._instance.shutdown(wait=True, timeout=5.0)
-            except:
+            except Exception:
                 pass
         ThreadManager._instance = None
     

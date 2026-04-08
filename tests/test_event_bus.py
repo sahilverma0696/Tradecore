@@ -100,33 +100,26 @@ class TestEventBus(unittest.TestCase):
     
     def test_event_history(self):
         """Test event history functionality."""
-        # Publish some events
         event1 = TestEvent("event1")
         event2 = QuoteEvent(
             timestamp=datetime.now(),
             source="test",
-            symbol="TEST",
             instrument="123",
+            name="TEST",
             ltp=100.0,
-            last_quantity=10,
-            volume=1000,
-            change=0.5,
-            raw_data={}
+            ltq=10.0,
         )
-        
+
         self.event_bus.publish(event1)
         self.event_bus.publish(event2)
-        
-        # Get all history
+
         history = self.event_bus.get_event_history()
         self.assertEqual(len(history), 2)
-        
-        # Get filtered history
+
         test_events = self.event_bus.get_event_history(TestEvent)
         self.assertEqual(len(test_events), 1)
         self.assertEqual(test_events[0].data, "event1")
-        
-        # Get limited history
+
         limited = self.event_bus.get_event_history(limit=1)
         self.assertEqual(len(limited), 1)
         self.assertIsInstance(limited[0], QuoteEvent)
@@ -335,13 +328,10 @@ class TestSubscriberMixin(unittest.TestCase):
         event_bus.publish(QuoteEvent(
             timestamp=datetime.now(),
             source="test",
-            symbol="TEST",
             instrument="123",
+            name="TEST",
             ltp=100.0,
-            last_quantity=10,
-            volume=1000,
-            change=0.5,
-            raw_data={}
+            ltq=10.0,
         ))
         
         # Should only receive the first event
@@ -357,43 +347,37 @@ class TestTradingEvents(unittest.TestCase):
         quote_event = QuoteEvent(
             timestamp=datetime.now(),
             source="ZerodhaStreamer",
-            symbol="NIFTY",
             instrument="256265",
+            name="NIFTY",
             ltp=18500.50,
-            last_quantity=25,
-            volume=1000000,
-            change=0.75,
-            raw_data={"source": "kite", "exchange": "NSE"}
+            ltq=25.0,
         )
-        
-        self.assertEqual(quote_event.symbol, "NIFTY")
+
+        self.assertEqual(quote_event.instrument, "256265")
+        self.assertEqual(quote_event.name, "NIFTY")
         self.assertEqual(quote_event.ltp, 18500.50)
-        self.assertEqual(quote_event.last_quantity, 25)
-        self.assertEqual(quote_event.raw_data["exchange"], "NSE")
-    
+        self.assertEqual(quote_event.ltq, 25.0)
+
     def test_candle_generated_creation(self):
         """Test CandleGenerated event creation."""
-        candle_data = {
-            'timestamp': datetime.now(),
-            'open': 18500.0,
-            'high': 18520.0,
-            'low': 18495.0,
-            'close': 18510.0,
-            'volume': 1000000,
-            'vwap': 18508.5
-        }
-        
         candle_event = CandleGenerated(
             timestamp=datetime.now(),
             source="CandleMaker",
             symbol="NIFTY",
-            candle_data=candle_data,
-            timeframe="5m"
+            timeframe="5",
+            open=18500.0,
+            high=18520.0,
+            low=18495.0,
+            close=18510.0,
+            volume=1000000,
+            vwap=18508.5,
+            is_complete=True,
         )
-        
+
         self.assertEqual(candle_event.symbol, "NIFTY")
-        self.assertEqual(candle_event.timeframe, "5m")
-        self.assertEqual(candle_event.candle_data['vwap'], 18508.5)
+        self.assertEqual(candle_event.timeframe, "5")
+        self.assertEqual(candle_event.vwap, 18508.5)
+        self.assertEqual(candle_event.close, 18510.0)
 
 
 class TestEventIntegration(unittest.TestCase):
@@ -424,48 +408,49 @@ class TestEventIntegration(unittest.TestCase):
         quote = QuoteEvent(
             timestamp=datetime.now(),
             source="Streamer",
-            symbol="TEST",
             instrument="123",
+            name="TEST",
             ltp=100.0,
-            last_quantity=10,
-            volume=1000,
-            change=0.5,
-            raw_data={}
+            ltq=10.0,
         )
         self.event_bus.publish(quote)
-        
+
         # 2. Candle generated
         candle = CandleGenerated(
             timestamp=datetime.now(),
             source="CandleMaker",
             symbol="TEST",
-            candle_data={"close": 100.5, "vwap": 100.2}
+            timeframe="3",
+            open=100.0,
+            high=101.0,
+            low=99.5,
+            close=100.5,
+            volume=1000,
+            vwap=100.2,
+            is_complete=True,
         )
         self.event_bus.publish(candle)
-        
+
         # 3. Entry signal generated
         entry = EntrySignal(
             timestamp=datetime.now(),
             source="Strategy",
             symbol="TEST",
-            side="BUY",
-            entry_price=100.5,
-            entry_vwap=100.2,
-            quantity=75,
-            exit_steps=[],
-            strategy_name="TestStrategy",
-            candle_data={}
+            direction="BUY",
+            price=100.5,
+            strategy="TestStrategy",
         )
         self.event_bus.publish(entry)
-        
+
         # 4. Exit signal generated
         exit_signal = ExitSignal(
             timestamp=datetime.now(),
             source="ExitManager",
             symbol="TEST",
-            exit_price=101.0,
-            exit_reason="PROFIT",
-            quantity=75
+            direction="SELL",
+            price=101.0,
+            quantity=75,
+            exit_type="PROFIT",
         )
         self.event_bus.publish(exit_signal)
         
@@ -481,15 +466,3 @@ class TestEventIntegration(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-    expected_flow = [
-        "QuoteEvent",
-        "CandleGenerated", 
-        "EntrySignal",
-        "ExitSignal"
-    ]
-    self.assertEqual(workflow_events, expected_flow)
-
-
-if __name__ == "__main__":
-    unittest.main()
-        

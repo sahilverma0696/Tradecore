@@ -1,283 +1,362 @@
 import threading
+import os
+import json
+import dataclasses
+from collections import deque
+from datetime import datetime
 from typing import Dict, List, Callable, Type, Any
-from collections import defaultdict
 import traceback
+
 from src.logger_factory import get_logger
 from .events import Event
-import json
-import os
-from datetime import datetime
+
+
+class _DatetimeEncoder(json.JSONEncoder):
+    """JSON encoder that converts datetime → ISO string."""
+    def default(self, obj):
+        if isinstance(obj, datetime):
+            return obj.isoformat()
+        return super().default(obj)
+
+
+def _deep_clean(obj: Any) -> Any:
+    """Recursively make obj JSON-safe: datetime→str, unknown→str."""
+    if isinstance(obj, datetime):
+        return obj.isoformat()
+    if isinstance(obj, dict):
+        return {k: _deep_clean(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [_deep_clean(v) for v in obj]
+    if isinstance(obj, (str, int, float, bool, type(None))):
+        return obj
+    return str(obj)
 
 
 class EventBus:
-    """Thread-safe event bus for pub-sub communication in trading system."""
-    
+    """
+    Thread-safe singleton pub-sub broker for the trading system.
+
+    Design decisions
+    ----------------
+    * Subscriber callbacks are invoked OUTSIDE the main lock.
+      The lock is held only long enough to snapshot the subscriber list and
+      update in-memory state.  This prevents slow callbacks (or callbacks that
+      publish their own events) from blocking the entire bus.
+
+    * Event history uses collections.deque(maxlen=N) – O(1) append/trim.
+
+    * IPC files are written atomically via a temp-file + os.replace() so the
+      dashboard never reads a half-written file.
+
+    * IPC state is kept in memory dicts; file writes never read back from disk,
+      eliminating the read-modify-write race that plagued the original code.
+
+    * QuoteEvents are NOT written to the general live_events.json – they fire
+      many times per second and the general file only needs significant events.
+    """
+
     _instance = None
-    _lock = threading.Lock()
-    
-    def __new__(cls):
+    _singleton_lock = threading.Lock()
+
+    def __new__(cls) -> "EventBus":
         if cls._instance is None:
-            with cls._lock:
+            with cls._singleton_lock:
                 if cls._instance is None:
                     cls._instance = super().__new__(cls)
         return cls._instance
-    
-    def __init__(self):
-        if hasattr(self, '_initialized'):
+
+    def __init__(self) -> None:
+        if hasattr(self, "_initialized"):
             return
-        
-        self._subscribers: Dict[Type[Event], List[Callable]] = defaultdict(list)
-        self._lock = threading.RLock()
+
         self._logger = get_logger("EventBus", console_output=True)
-        self._event_history: List[Event] = []
-        self._max_history = 1000
-        self._initialized = True
-        
-        # IPC support for CLI communication
+
+        # Subscriptions: class → [callback, ...]
+        self._subscribers: Dict[Type[Event], List[Callable]] = {}
+        self._sub_lock = threading.RLock()   # guards _subscribers
+
+        # Event history – deque gives O(1) popleft vs O(n) list.pop(0)
+        self._history: deque = deque()
+        self._max_history: int = 1000
+        self._history_lock = threading.Lock()
+
+        # IPC – in-memory state (no disk reads on update)
         self._ipc_enabled = True
-        self._ipc_file = "data/live_events.json"
-        self._quote_file = "data/live_quotes.json"
-        self._candle_file = "data/live_candles.json"
-        os.makedirs("data", exist_ok=True)
-        
-        # ThreadManager for async IPC operations (lazy initialization)
+        self._ipc_dir = "data"
+        self._ipc_event_file = os.path.join(self._ipc_dir, "live_events.json")
+        self._ipc_events_log = os.path.join(self._ipc_dir, "live_events_log.json")
+        self._quote_file = os.path.join(self._ipc_dir, "live_quotes.json")
+        self._candle_file = os.path.join(self._ipc_dir, "live_candles.json")
+        os.makedirs(self._ipc_dir, exist_ok=True)
+        self._events_log: deque = deque(maxlen=200)   # rolling buffer of last 200 events
+        self._events_log_lock = threading.Lock()
+
+        self._quote_state: Dict[str, dict] = {}    # keyed by instrument
+        self._candle_state: Dict[str, dict] = {}   # keyed by symbol
+        self._ipc_state_lock = threading.Lock()    # guards both state dicts
+
+        # Lazy ThreadManager reference (avoids circular import at module load)
         self._thread_manager = None
-        
-        self._logger.info("EventBus initialized and ready for component registration")
-    
+        self._tm_init_lock = threading.Lock()
+
+        self._initialized = True
+        self._logger.info("EventBus ready")
+
+    # ------------------------------------------------------------------
+    # ThreadManager – lazy, thread-safe
+    # ------------------------------------------------------------------
+
     def _get_thread_manager(self):
-        """Lazy initialization of ThreadManager to avoid circular imports."""
-        if self._thread_manager is None:
+        """Return ThreadManager singleton, initialising the reference once."""
+        if self._thread_manager is not None:
+            return self._thread_manager
+
+        with self._tm_init_lock:
+            if self._thread_manager is not None:   # double-checked under lock
+                return self._thread_manager
             try:
                 from src.core.thread_manager import ThreadManager, ThreadPoolType
                 self._thread_manager = ThreadManager()
                 self._ThreadPoolType = ThreadPoolType
             except ImportError:
-                self._logger.warning("ThreadManager not available, IPC writes will be synchronous")
-                self._thread_manager = False
-        return self._thread_manager
+                self._logger.warning("ThreadManager not available – IPC writes will be synchronous")
+                self._thread_manager = False   # sentinel: don't retry
+            return self._thread_manager
 
-    def subscribe(self, event_type: Type[Event], callback: Callable[[Event], None], 
-                  subscriber_name: str = None):
-        """Subscribe to events of a specific type."""
-        with self._lock:
+    # ------------------------------------------------------------------
+    # Subscribe / unsubscribe
+    # ------------------------------------------------------------------
+
+    def subscribe(
+        self,
+        event_type: Type[Event],
+        callback: Callable[[Event], None],
+        subscriber_name: str = None,
+    ) -> None:
+        with self._sub_lock:
+            if event_type not in self._subscribers:
+                self._subscribers[event_type] = []
             self._subscribers[event_type].append(callback)
-            subscriber_name = subscriber_name or getattr(callback, '__name__', 'unknown')
-            self._logger.info(f"📝 {subscriber_name} subscribed to {event_type.__name__}")
-    
-    def unsubscribe(self, event_type: Type[Event], callback: Callable[[Event], None]):
-        """Unsubscribe from events of a specific type."""
-        with self._lock:
-            if callback in self._subscribers[event_type]:
-                self._subscribers[event_type].remove(callback)
-                self._logger.debug(f"Unsubscribed from {event_type.__name__}")
-    
-    def publish(self, event: Event):
-        """Publish an event to all subscribers."""
-        with self._lock:
-            # Store event in history
-            self._event_history.append(event)
-            if len(self._event_history) > self._max_history:
-                self._event_history.pop(0)
-            
-            # Get subscribers for this event type and its parent types
-            subscribers = []
-            for event_class in event.__class__.__mro__:
-                if event_class in self._subscribers:
-                    subscribers.extend(self._subscribers[event_class])
-            
-            # self._logger.debug(f"📢 Publishing {event.__class__.__name__} to {len(subscribers)} subscribers {event}")
-            
-            # Notify all subscribers
-            for callback in subscribers:
-                try:
-                    callback(event)
-                except Exception as e:
-                    subscriber_name = getattr(callback, '__name__', 'unknown')
-                    self._logger.error(f"❌ Error in subscriber {subscriber_name} for {event.__class__.__name__}: {e}")
-                    self._logger.debug(traceback.format_exc())
-            
-            # Write to IPC files asynchronously via ThreadManager
-            if self._ipc_enabled:
-                self._schedule_ipc_write(event)
-    
-    def _schedule_ipc_write(self, event: Event):
-        """Schedule IPC write operation asynchronously to prevent EventBus blocking."""
-        thread_manager = self._get_thread_manager()
-        
-        if thread_manager and thread_manager is not False:
-            # Submit IPC write task to SYSTEM thread pool (I/O operations)
+
+        name = subscriber_name or getattr(callback, "__qualname__", "unknown")
+        self._logger.info(f"{name} subscribed to {event_type.__name__}")
+
+    def unsubscribe(
+        self, event_type: Type[Event], callback: Callable[[Event], None]
+    ) -> None:
+        with self._sub_lock:
+            bucket = self._subscribers.get(event_type)
+            if bucket and callback in bucket:
+                bucket.remove(callback)
+
+    # ------------------------------------------------------------------
+    # Publish
+    # ------------------------------------------------------------------
+
+    def publish(self, event: Event) -> None:
+        """
+        Broadcast event to all subscribers.
+
+        The subscriber list is snapshot-copied under the lock so the lock is
+        released before any callback executes.  This allows:
+        - Callbacks to publish their own events without deadlocking.
+        - Other threads to publish concurrently without waiting.
+        """
+        # ── 1. Record in history (fast, under a narrow lock) ──────────
+        with self._history_lock:
+            self._history.append(event)
+            while len(self._history) > self._max_history:
+                self._history.popleft()
+
+        # ── 2. Snapshot subscribers – brief lock, no I/O, no callbacks ─
+        with self._sub_lock:
+            subscribers: List[Callable] = []
+            for cls in event.__class__.__mro__:
+                if cls in self._subscribers:
+                    subscribers.extend(self._subscribers[cls])
+
+        # ── 3. Dispatch – lock released ───────────────────────────────
+        if not subscribers:
+            self._logger.warning(
+                f"No subscribers for {event.__class__.__name__} – event dropped"
+            )
+            return
+
+        for callback in subscribers:
             try:
-                thread_manager.submit_task(
-                    self._ThreadPoolType.SYSTEM,
-                    self._write_event_to_ipc,
-                    event
-                )
+                callback(event)
             except Exception as e:
-                self._logger.debug(f"Could not schedule IPC write task: {e}")
-                # Fallback to synchronous write
-                self._write_event_to_ipc(event)
-        else:
-            # Fallback to synchronous write if ThreadManager not available
-            self._write_event_to_ipc(event)
+                name = getattr(callback, "__qualname__", "unknown")
+                self._logger.error(
+                    f"Subscriber '{name}' raised on {event.__class__.__name__}: {e}"
+                )
+                self._logger.debug(traceback.format_exc())
 
-    def _write_event_to_ipc(self, event: Event):
-        """Write event to IPC file for CLI consumption (runs in SYSTEM thread pool)."""
+        # ── 4. Async IPC write (non-blocking) ─────────────────────────
+        if self._ipc_enabled:
+            self._schedule_ipc_write(event)
+
+    # ------------------------------------------------------------------
+    # IPC scheduling
+    # ------------------------------------------------------------------
+
+    def _schedule_ipc_write(self, event: Event) -> None:
+        tm = self._get_thread_manager()
+        if tm and tm is not False and tm.is_alive():
+            try:
+                tm.submit_task(self._ThreadPoolType.SYSTEM, self._write_ipc, event)
+                return
+            except Exception:
+                pass
+        # Fallback: write synchronously (startup or teardown)
+        self._write_ipc(event)
+
+    def _write_ipc(self, event: Event) -> None:
+        event_type = event.__class__.__name__
         try:
-            event_type = event.__class__.__name__
-            
-            # Handle different event types with specific IPC files
-            if event_type == 'QuoteEvent':
-                self._write_quote_ipc(event)
-            elif event_type == 'CandleGenerated':
-                self._write_candle_ipc(event)
-            
-            # Always write to general events file
-            self._write_general_event_ipc(event)
-                    
+            if event_type == "QuoteEvent":
+                self._update_quote_state(event)
+                self._flush_quotes()
+            elif event_type == "CandleGenerated":
+                self._update_candle_state(event)
+                self._flush_candles()
+                self._write_general_event(event)  # heartbeat in event log
+            else:
+                # Only non-tick events go to the general file
+                self._write_general_event(event)
         except Exception as e:
-            self._logger.debug(f"IPC write error: {e}")
+            self._logger.debug(f"IPC write error ({event_type}): {e}")
 
-    def _write_quote_ipc(self, event: Event):
-        """Write QuoteEvent to dedicated quotes file."""
+    # ------------------------------------------------------------------
+    # IPC state helpers
+    # ------------------------------------------------------------------
+
+    def _update_quote_state(self, event: Event) -> None:
+        entry = {
+            "symbol": event.instrument,
+            "ltp": float(event.ltp),
+            "ltq": float(event.ltq),
+            "timestamp": event.timestamp.isoformat()
+            if hasattr(event.timestamp, "isoformat")
+            else str(event.timestamp),
+            "source": event.source,
+        }
+        with self._ipc_state_lock:
+            self._quote_state[event.instrument] = entry
+            # Keep at most 10 symbols (trim oldest by timestamp)
+            if len(self._quote_state) > 10:
+                oldest = min(
+                    self._quote_state.keys(),
+                    key=lambda k: self._quote_state[k].get("timestamp", ""),
+                )
+                del self._quote_state[oldest]
+
+    def _update_candle_state(self, event: Event) -> None:
+        entry = {
+            "symbol": event.symbol,
+            "timeframe": event.timeframe,
+            "timestamp": event.timestamp.isoformat()
+            if hasattr(event.timestamp, "isoformat")
+            else str(event.timestamp),
+            "open": float(event.open),
+            "high": float(event.high),
+            "low": float(event.low),
+            "close": float(event.close),
+            "volume": float(event.volume),
+            "vwap": float(event.vwap),
+            "is_complete": event.is_complete,
+            "source": event.source,
+        }
+        with self._ipc_state_lock:
+            self._candle_state[event.symbol] = entry
+            if len(self._candle_state) > 5:
+                oldest = min(
+                    self._candle_state.keys(),
+                    key=lambda k: self._candle_state[k].get("timestamp", ""),
+                )
+                del self._candle_state[oldest]
+
+    def _flush_quotes(self) -> None:
+        with self._ipc_state_lock:
+            snapshot = dict(self._quote_state)
+        self._atomic_json_write(self._quote_file, snapshot)
+
+    def _flush_candles(self) -> None:
+        with self._ipc_state_lock:
+            snapshot = dict(self._candle_state)
+        self._atomic_json_write(self._candle_file, snapshot)
+
+    def _write_general_event(self, event: Event) -> None:
+        payload = {
+            "timestamp": datetime.now().isoformat(),
+            "type": event.__class__.__name__,
+            "data": self._serialize_event(event),
+        }
+        self._atomic_json_write(self._ipc_event_file, payload)
+        # Also append to rolling log
+        with self._events_log_lock:
+            self._events_log.append(payload)
+            snapshot = list(self._events_log)
+        self._atomic_json_write(self._ipc_events_log, snapshot)
+
+    @staticmethod
+    def _atomic_json_write(path: str, data: Any) -> None:
+        """Write JSON atomically via unique tmp file → rename."""
+        # Use pid+thread id so concurrent writes don't collide on the same .tmp
+        tmp = f"{path}.{os.getpid()}.{threading.current_thread().ident}.tmp"
+        with open(tmp, "w") as f:
+            json.dump(data, f, indent=2, cls=_DatetimeEncoder)
+        os.replace(tmp, path)
+
+    @staticmethod
+    def _serialize_event(event: Event) -> dict:
+        """Serialize a dataclass event to a plain JSON-safe dict."""
         try:
-            quote_data = {
-                event.instrument: {
-                    'symbol': event.instrument,
-                    'ltp': float(event.ltp),
-                    'ltq': float(event.ltq),
-                    'timestamp': event.timestamp.isoformat() if hasattr(event.timestamp, 'isoformat') else str(event.timestamp),
-                    'source': event.source
-                }
-            }
-            
-            # Read existing quotes
-            existing_quotes = {}
-            if os.path.exists(self._quote_file):
-                try:
-                    with open(self._quote_file, 'r') as f:
-                        existing_quotes = json.load(f)
-                except:
-                    existing_quotes = {}
-            
-            # Update with new quote
-            existing_quotes.update(quote_data)
-            
-            # Keep only last 10 symbols to prevent file from growing too large
-            if len(existing_quotes) > 10:
-                sorted_items = sorted(existing_quotes.items(), 
-                                    key=lambda x: x[1].get('timestamp', ''), 
-                                    reverse=True)
-                existing_quotes = dict(sorted_items[:10])
-            
-            # Write updated quotes
-            with open(self._quote_file, 'w') as f:
-                json.dump(existing_quotes, f, indent=2)
-                        
-        except Exception as e:
-            self._logger.debug(f"Could not write quote to IPC file: {e}")
+            if dataclasses.is_dataclass(event):
+                raw = dataclasses.asdict(event)
+            else:
+                raw = {k: v for k, v in vars(event).items() if not k.startswith("_")}
+            return _deep_clean(raw)
+        except Exception:
+            return {"error": "serialization_failed"}
 
-    def _write_candle_ipc(self, event: Event):
-        """Write CandleGenerated event to dedicated candles file."""
-        try:
-            candle_data = {
-                event.symbol: {
-                    'symbol': event.symbol,
-                    'timeframe': event.timeframe,
-                    'timestamp': event.timestamp.isoformat() if hasattr(event.timestamp, 'isoformat') else str(event.timestamp),
-                    'open': float(event.open),
-                    'high': float(event.high),
-                    'low': float(event.low),
-                    'close': float(event.close),
-                    'volume': float(event.volume),
-                    'vwap': float(event.vwap),
-                    'is_complete': event.is_complete,
-                    'source': event.source
-                }
-            }
-            
-            # Read existing candles
-            existing_candles = {}
-            if os.path.exists(self._candle_file):
-                try:
-                    with open(self._candle_file, 'r') as f:
-                        existing_candles = json.load(f)
-                except:
-                    existing_candles = {}
-            
-            # Update with new candle
-            existing_candles.update(candle_data)
-            
-            # Keep only last 5 symbols to prevent file from growing too large
-            if len(existing_candles) > 5:
-                sorted_items = sorted(existing_candles.items(), 
-                                    key=lambda x: x[1].get('timestamp', ''), 
-                                    reverse=True)
-                existing_candles = dict(sorted_items[:5])
-            
-            # Write updated candles
-            with open(self._candle_file, 'w') as f:
-                json.dump(existing_candles, f, indent=2)
-                        
-        except Exception as e:
-            self._logger.debug(f"Could not write candle to IPC file: {e}")
+    # ------------------------------------------------------------------
+    # Introspection
+    # ------------------------------------------------------------------
 
-    def _write_general_event_ipc(self, event: Event):
-        """Write general event to main IPC file."""
-        try:
-            event_data = {
-                'timestamp': datetime.now().isoformat(),
-                'type': event.__class__.__name__,
-                'data': self._serialize_event(event)
-            }
-            
-            # Write to general events file (always overwrite with latest)
-            with open(self._ipc_file, 'w') as f:
-                json.dump(event_data, f, indent=2)
-                
-        except Exception as e:
-            self._logger.debug(f"Could not write general event to IPC file: {e}")
+    def get_event_history(
+        self, event_type: Type[Event] = None, limit: int = None
+    ) -> List[Event]:
+        with self._history_lock:
+            events = list(self._history)
+        if event_type:
+            events = [e for e in events if isinstance(e, event_type)]
+        if limit:
+            events = events[-limit:]
+        return events
 
-    def _serialize_event(self, event: Event):
-        """Serialize event for IPC."""
-        try:
-            data = {}
-            for attr in dir(event):
-                if not attr.startswith('_') and not callable(getattr(event, attr)):
-                    value = getattr(event, attr)
-                    if hasattr(value, 'isoformat'):  # datetime
-                        data[attr] = value.isoformat()
-                    elif isinstance(value, (str, int, float, bool, list, dict)):
-                        data[attr] = value
-                    else:
-                        data[attr] = str(value)
-            return data
-        except Exception as e:
-            self._logger.debug(f"Serialization error: {e}")
-            return {'error': 'serialization_failed'}
+    def clear_history(self) -> None:
+        with self._history_lock:
+            self._history.clear()
 
-    def get_event_history(self, event_type: Type[Event] = None, limit: int = None) -> List[Event]:
-        """Get event history, optionally filtered by type."""
-        with self._lock:
-            events = self._event_history
-            if event_type:
-                events = [e for e in events if isinstance(e, event_type)]
-            if limit:
-                events = events[-limit:]
-            return events.copy()
-    
-    def clear_history(self):
-        """Clear event history."""
-        with self._lock:
-            self._event_history.clear()
-            self._logger.debug("Event history cleared")
-    
     def get_subscriber_count(self, event_type: Type[Event]) -> int:
-        """Get number of subscribers for an event type."""
-        with self._lock:
+        with self._sub_lock:
             return len(self._subscribers.get(event_type, []))
-    
+
     def list_event_types(self) -> List[str]:
-        """Get list of all event types that have subscribers."""
-        with self._lock:
-            return [event_type.__name__ for event_type in self._subscribers.keys()]
+        with self._sub_lock:
+            return [cls.__name__ for cls in self._subscribers]
+
+    def get_wiring_map(self) -> dict:
+        """Return {EventType: [subscriber_name, ...]} for system introspection."""
+        result = {}
+        with self._sub_lock:
+            for event_cls, callbacks in self._subscribers.items():
+                names = []
+                for cb in callbacks:
+                    qualname = getattr(cb, "__qualname__", "")
+                    # e.g. "OrderManager._on_ltp_update" → "OrderManager"
+                    name = qualname.split(".")[0] if qualname else "unknown"
+                    names.append(name)
+                result[event_cls.__name__] = names
+        return result

@@ -2,6 +2,7 @@
 import time
 import signal
 import sys
+import os
 from datetime import datetime
 from threading import Event
 
@@ -17,11 +18,12 @@ from src.core.order_manager import OrderManager
 
 # Strategy components
 from src.strategies.vwap_strategy import VwapStrategy
-from src.strategies.exit_manager import ExitManager
 
 # Factory imports for dynamic component creation
 from src.core.executors.executor_factory import ExecutorFactory
 from src.core.streamer.streamer_factory import StreamerFactory
+
+from src.data_store.quote_event_db_subscriber import QuoteEventDBSubscriber
 
 logger = get_logger("MAIN", console_output=True)
 
@@ -41,9 +43,9 @@ def load_configurations():
         system_config = SystemConfigManager()
         trading_config = ConfigManager()
         
-        logger.info(f"System mode: {system_config.get('system.mode', 'offline')}")
-        logger.info(f"Streamer type: {system_config.get('streamer.type', 'offline')}")
-        logger.info(f"Executor type: {system_config.get('executor.type', 'mock')}")
+        logger.info(f"System mode: {system_config.get('system.mode')}")
+        logger.info(f"Active streamer: {system_config.get_active_streamer()}")
+        logger.info(f"Active executor: {system_config.get_active_executor()}")
         
         logger.info("✅ Configurations loaded successfully")
         return system_config, trading_config
@@ -52,9 +54,45 @@ def load_configurations():
         logger.error(f"❌ Failed to load configurations: {e}")
         raise
 
+def _write_system_state():
+    """Write event wiring map + session info to IPC for sys_cli."""
+    try:
+        bus = EventBus()
+        wiring = bus.get_wiring_map()
+        system_config = SystemConfigManager()
+        state = {
+            "session_start": datetime.now().isoformat(),
+            "streamer":  system_config.get_active_streamer(),
+            "executor":  system_config.get_active_executor(),
+            "event_flows": {
+                event: {"subscribers": subs, "count": 0}
+                for event, subs in wiring.items()
+            },
+        }
+        import json
+        os.makedirs("data", exist_ok=True)
+        tmp = "data/live_system.json.tmp"
+        with open(tmp, "w") as f:
+            json.dump(state, f, indent=2)
+        os.replace(tmp, "data/live_system.json")
+    except Exception as e:
+        logger.debug(f"system state write error: {e}")
+
+
+def _clear_ipc_files():
+    """Wipe stale IPC files and leftover .tmp files from previous runs."""
+    import glob
+    for path in glob.glob("data/live_*.json") + glob.glob("data/live_*.json.*.tmp"):
+        try:
+            os.remove(path)
+        except OSError:
+            pass
+
+
 def initialize_foundation():
     """Initialize the system foundation: thread pools and event bus."""
     logger.info("🏗️ Initializing system foundation...")
+    _clear_ipc_files()
     
     # Step 1: Initialize thread pool system
     logger.info("1️⃣ Initializing thread pool system...")
@@ -97,26 +135,23 @@ def create_and_register_components(system_config, trading_config):
         logger.info("Creating core components...")
         
         # CandleMaker - subscribes to quotes, publishes candles
-        logger.info("   📊 Creating CandleMaker...")
         components['candle_maker'] = CandleMaker()
-        logger.info("   ✅ CandleMaker registered for quote → candle conversion")
         
         # OrderManager - subscribes to signals, manages orders (now with integrated exit logic)
-        logger.info("   📋 Creating OrderManager...")
+        # logger.info("   📋 Creating OrderManager...")
         components['order_manager'] = OrderManager()
-        logger.info("   ✅ OrderManager registered for order lifecycle management with integrated exits")
+        # logger.info("   ✅ OrderManager registered for order lifecycle management with integrated exits")
         
         # Create strategy components
         logger.info("Creating strategy components...")
         config = trading_config.get()
         
         # VwapStrategy - subscribes to candles, publishes entry signals
-        logger.info("   💡 Creating VwapStrategy...")
+        # logger.info("   💡 Creating VwapStrategy...")
         components['vwap_strategy'] = VwapStrategy(config=config)
-        logger.info("   ✅ VwapStrategy registered for candle → signal generation")
+        # logger.info("   ✅ VwapStrategy registered for candle → signal generation")
         
-        # Note: ExitManager is no longer needed as exit logic is integrated into OrderObject
-        logger.info("   ✅ Exit logic integrated into OrderObject (no separate ExitManager needed)")
+        components['quote_db_subscriber'] = QuoteEventDBSubscriber()
         
         # Create executor using factory
         logger.info("Creating executor...")
@@ -126,10 +161,9 @@ def create_and_register_components(system_config, trading_config):
         
         logger.info(f"   ⚡ Creating {exec_type} executor...")
         components['executor'] = ExecutorFactory.create_executor(
-            broker=exec_type,
+            executor_type=exec_type,
             config=config_data
         )
-        logger.info(f"   ✅ {exec_type} executor created for order execution")
         
         # Create streamer using factory
         logger.info("Creating market data streamer...")
@@ -140,9 +174,9 @@ def create_and_register_components(system_config, trading_config):
         # Get symbols from main configuration for other streamers
         symbols = trading_config.get().get('symbols')
         if not symbols:
-            logger.error("No symbols configured for streaming. Sending exit signal.")
+            logger.error("No symbols configured for streaming.")
             shutdown_event.set()
-            sys.exit(1)         # TODO: proper exit signal needed for graceful shutdown
+            raise RuntimeError("No symbols configured – cannot start streamer")
         
         logger.info(f"   📡 Creating {streamer_type} streamer...")
         components['streamer'] = StreamerFactory.create_streamer(
@@ -153,11 +187,12 @@ def create_and_register_components(system_config, trading_config):
         logger.info(f"   ✅ {streamer_type} streamer created for market data")
         
         # Log subscription status
-        logger.info("📢 Event subscription summary:")
+        from src.core.event_bus.events import QuoteEvent, CandleGenerated, EntrySignal
+        logger.info("Event subscription summary:")
         event_bus = EventBus()
-        logger.info(f"   QuoteEvent subscribers: {len(event_bus._subscribers.get('QuoteEvent', []))}")
-        logger.info(f"   CandleGenerated subscribers: {len(event_bus._subscribers.get('CandleGenerated', []))}")
-        logger.info(f"   EntrySignal subscribers: {len(event_bus._subscribers.get('EntrySignal', []))}")
+        logger.info(f"   QuoteEvent subscribers: {event_bus.get_subscriber_count(QuoteEvent)}")
+        logger.info(f"   CandleGenerated subscribers: {event_bus.get_subscriber_count(CandleGenerated)}")
+        logger.info(f"   EntrySignal subscribers: {event_bus.get_subscriber_count(EntrySignal)}")
         
         logger.info("✅ All components created and registered with EventBus")
         return components
@@ -166,25 +201,64 @@ def create_and_register_components(system_config, trading_config):
         logger.error(f"❌ Failed to create components: {e}")
         raise
 
-def wire_component_dependencies(components):
-    """Wire direct dependencies between components (non-event based)."""
-    logger.info("🔗 Wiring component dependencies...")
-    
-    try:
-        # Only wire OrderManager and Executor now
-        # ExitManager is no longer needed as exit logic is in OrderObject
-        order_manager = components['order_manager']
-        executor = components['executor']
-        
-        # Wire executor to order manager
-        logger.info("   🔗 Connecting Executor → OrderManager")
-        order_manager.register_handler(executor.execute_order)
-        
-        logger.info("✅ Component dependencies wired successfully")
-        
-    except Exception as e:
-        logger.error(f"❌ Failed to wire components: {e}")
-        raise
+def validate_system_wiring():
+    """
+    Pre-flight check: verify every critical event flow has its minimum
+    number of subscribers before the streamer is allowed to start.
+
+    If any flow is broken the system raises immediately rather than
+    running silently with missing components.
+
+    Critical wiring map
+    -------------------
+    QuoteEvent      -> CandleMaker + OrderManager            (min 2)
+    CandleGenerated -> VwapStrategy + OrderManager           (min 2)
+    EntrySignal     -> OrderManager                          (min 1)
+    OrderEvent      -> Executor                              (min 1)
+    """
+    from src.core.event_bus.events import (
+        QuoteEvent, CandleGenerated, EntrySignal, OrderEvent
+    )
+
+    REQUIRED: dict = {
+        QuoteEvent:      (2, "CandleMaker + OrderManager"),
+        CandleGenerated: (2, "VwapStrategy + OrderManager"),
+        EntrySignal:     (1, "OrderManager"),
+        OrderEvent:      (1, "Executor"),
+    }
+
+    event_bus = EventBus()
+    failures = []
+    ok = []
+
+    for event_type, (min_count, expected) in REQUIRED.items():
+        actual = event_bus.get_subscriber_count(event_type)
+        if actual < min_count:
+            failures.append(
+                f"  MISSING  {event_type.__name__:<20} "
+                f"got {actual}, need >={min_count}  ({expected})"
+            )
+        else:
+            ok.append(
+                f"  OK       {event_type.__name__:<20} "
+                f"{actual} subscriber(s)  ({expected})"
+            )
+
+    logger.info("System wiring check:")
+    for line in ok:
+        logger.info(line)
+    for line in failures:
+        logger.error(line)
+
+    if failures:
+        raise RuntimeError(
+            f"System wiring incomplete – {len(failures)} flow(s) not connected. "
+            "Fix component registration before starting."
+        )
+
+    logger.info("All event flows connected – system ready to start")
+    _write_system_state()
+
 
 def start_system_components(components, system_config):
     """Start all system components in proper order."""
@@ -220,34 +294,46 @@ def start_system_components(components, system_config):
         logger.error(f"❌ Failed to start system components: {e}")
         raise
 
-def run_monitoring_loop(components, thread_manager):
+def run_monitoring_loop(components, thread_manager, streaming_future=None):
     """Run the main system monitoring loop."""
-    logger.info("👁️ Entering main monitoring loop... Press Ctrl+C to stop")
-    
+    logger.info("Entering main monitoring loop... Press Ctrl+C to stop")
+
     streamer = components.get('streamer')
-    
+
     while not shutdown_event.is_set():
         try:
-            # System health monitoring
-            if thread_manager:
+            # Check whether the async streamer task died unexpectedly
+            if streaming_future is not None and streaming_future.done():
+                exc = None
+                try:
+                    exc = streaming_future.exception()
+                except Exception as e:
+                    exc = e
+                if exc is not None:
+                    logger.error(f"Streamer task failed: {exc} – initiating shutdown")
+                    shutdown_event.set()
+                    break
+                # Future completed cleanly (streamer ran to end) – treat as stop
+                if not shutdown_event.is_set():
+                    logger.warning("Streamer task ended without error – shutting down")
+                    shutdown_event.set()
+                    break
+
+            # System health
+            if thread_manager and thread_manager.is_alive():
                 stats = thread_manager.get_pool_stats()
-                total_active = sum(pool.get('active_tasks', 0) for pool in stats.values())
-                
+                total_active = sum(p.get('active_tasks', 0) for p in stats.values())
                 if total_active > 0:
-                    logger.debug(f"Active tasks across all pools: {total_active}")
-            
-            # Check streamer status
+                    logger.debug(f"Active tasks across pools: {total_active}")
+
+            # Check streamer is still alive
             if streamer and hasattr(streamer, 'get_status'):
                 status = streamer.get_status()
                 if not status.get('is_running', False):
-                    logger.warning("⚠️ Streamer is not running - may need restart")
-            
-            # Sleep and check for shutdown signal
-            shutdown_event.wait(timeout=30.0)  # Check every 30 seconds
-            
-        except KeyboardInterrupt:
-            logger.info("Keyboard interrupt received")
-            break
+                    logger.warning("Streamer is not running – may need restart")
+
+            shutdown_event.wait(timeout=30.0)
+
         except Exception as e:
             logger.error(f"Error in monitoring loop: {e}")
             break
@@ -302,10 +388,10 @@ def main():
         
         # PHASE 3: Create and register all components with event bus
         components = create_and_register_components(system_config, trading_config)
-        
-        # PHASE 4: Wire direct dependencies (non-event based)
-        wire_component_dependencies(components)
-        
+
+        # PHASE 4: Validate every critical event flow is wired before starting
+        validate_system_wiring()
+
         # PHASE 5: Start all system components
         streaming_future = start_system_components(components, system_config)
         
@@ -314,7 +400,7 @@ def main():
         # logger.info("🔄 Market data streaming and strategy processing active")
         
         # PHASE 6: Run monitoring loop
-        run_monitoring_loop(components, thread_manager)
+        run_monitoring_loop(components, thread_manager, streaming_future)
         
     except Exception as e:
         logger.error(f"💥 Critical error in main: {e}")

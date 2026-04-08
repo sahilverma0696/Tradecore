@@ -68,5 +68,4 @@ def main():
 if __name__ == "__main__":
     exit_code = main()
     sys.exit(exit_code)
-    start_dashboard(use_curses=use_curses)
 

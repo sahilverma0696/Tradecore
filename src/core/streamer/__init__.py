@@ -15,7 +15,6 @@ except ImportError:
 
 __all__ = [
     'BaseStreamer', 
-    'QuoteNormalizer', 
     'QuoteEvent', 
     'StreamerFactory'
 ]

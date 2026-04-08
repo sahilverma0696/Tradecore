@@ -1,143 +1,123 @@
-"""Live Zerodha ticker to quote handler pipeline."""
+"""Zerodha KiteTicker streamer."""
 from datetime import datetime
-import threading
-import time
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 
-from kiteconnect import KiteConnect, KiteTicker
-
-from src.logger_factory import get_logger
-from src.core.executioner import Execute
-from src.core.event_bus import Publisher, QuoteEvent, FullQuoteEvent
+from src.core.event_bus.events import QuoteEvent
 from .base_streamer import BaseStreamer
-from .quote_normalizer import QuoteNormalizer
-from .events import QuoteEvent
 
 
 class ZerodhaStreamer(BaseStreamer):
-    """Zerodha KiteTicker streamer implementation."""
-    
+    """
+    Streams real-time ticks via Zerodha KiteTicker.
+
+    Requires kiteconnect: pip install kiteconnect
+    Call init_kite(access_token) before start().
+    """
+
     def __init__(
         self,
         symbols: List[int],
         *,
         api_key: str,
-        api_secret: str,
-        name_symbol: str,
-        paper_trade: bool = True,
+        access_token: str = None,
+        name_symbol: str = "ZERODHA",
     ):
-        # Convert int symbols to strings for BaseStreamer
-        symbol_strings = [str(s) for s in symbols]
-        super().__init__(symbol_strings, name="ZerodhaStreamer")
-        
-        self.symbols = symbols  # Keep original int symbols for Kite
+        # BaseStreamer stores symbols as strings internally
+        super().__init__([str(s) for s in symbols], name="ZerodhaStreamer")
+        self._int_symbols = list(symbols)   # Kite needs ints
         self.api_key = api_key
-        self.api_secret = api_secret
+        self.access_token = access_token
         self.name_symbol = name_symbol
-        self._kite: KiteConnect | None = None
-        self._ticker: KiteTicker | None = None
-        self._paper = paper_trade
-        self._exec: Execute | None = None
-        self._last_second: dict[int, str] = {}
+        self._kite = None
+        self._ticker = None
+
+    # ------------------------------------------------------------------
+    # Kite initialisation (call before start)
+    # ------------------------------------------------------------------
 
     def init_kite(self, access_token: str = None):
-        """Initialize Kite connection and authentication."""
+        """Connect to Kite API. Raises if kiteconnect is not installed."""
+        try:
+            from kiteconnect import KiteConnect, KiteTicker
+        except ImportError:
+            raise RuntimeError("kiteconnect not installed – pip install kiteconnect")
+
+        token = access_token or self.access_token
+        if not token:
+            raise RuntimeError("access_token required for ZerodhaStreamer")
+
         self._kite = KiteConnect(api_key=self.api_key)
-        if access_token:
-            self._kite.set_access_token(access_token)
-        else:
-            print("Generate login url:", self._kite.login_url())
-            req = input("Enter request token: ")
-            sess = self._kite.generate_session(req, api_secret=self.api_secret)
-            self._kite.set_access_token(sess["access_token"])
-        
-        # Create Execute instance with correct parameters
-        self._exec = Execute(
-            client=self._kite, 
-            paper_trade=self._paper, 
-            logger=self._logger
-        )
-        return self._exec
+        self._kite.set_access_token(token)
+        self.access_token = token
+        self._logger.info("Kite client initialised")
 
-    def get_execute(self):
-        """Get the Execute instance"""
-        return self._exec
+    # ------------------------------------------------------------------
+    # BaseStreamer interface
+    # ------------------------------------------------------------------
 
-    def get_kite(self):
-        return self._kite
-
-    # BaseStreamer abstract methods implementation
     def _setup_connection(self):
-        """Setup Kite ticker connection."""
         if not self._kite:
-            raise RuntimeError("call init_kite() first")
-        
-        self._ticker = KiteTicker(self.api_key, self._kite.access_token)
-        self._ticker.on_ticks = self._on_ticks
+            raise RuntimeError("Call init_kite() before starting ZerodhaStreamer")
+        try:
+            from kiteconnect import KiteTicker
+        except ImportError:
+            raise RuntimeError("kiteconnect not installed")
+
+        self._ticker = KiteTicker(self.api_key, self.access_token)
+        self._ticker.on_ticks   = self._on_ticks
         self._ticker.on_connect = self._on_connect
-        self._ticker.on_close = self._on_close
-        self._ticker.on_error = self._on_error
+        self._ticker.on_close   = self._on_close
+        self._ticker.on_error   = self._on_error
 
     def _run_connection(self):
-        """Run the ticker connection."""
-        try:
-            self._ticker.connect()
-        except Exception as e:
-            self._handle_connection_error(e)
+        self._ticker.connect(threaded=False)
 
     def _cleanup_connection(self):
-        """Cleanup ticker connection."""
         if self._ticker:
             try:
                 self._ticker.close()
             except Exception as e:
-                self._logger.error(f"Error closing ticker: {e}")
+                self._logger.error(f"Ticker close error: {e}")
+            self._ticker = None
 
-    def _normalize_raw_data(self, raw_data: Dict[str, Any], symbol: str) -> QuoteEvent:
-        """Normalize Zerodha tick data to QuoteEvent."""
-        return QuoteNormalizer.normalize_zerodha_tick(
-            raw_data, symbol, self.name
-        )
+    def _normalize_raw_data(self, raw_data: Dict[str, Any], symbol: str) -> Optional[QuoteEvent]:
+        try:
+            ltp = float(raw_data.get('last_price', 0))
+            ltq = float(raw_data.get('last_traded_quantity', 0))
+            ts  = raw_data.get('timestamp') or datetime.now()
+            return QuoteEvent(
+                timestamp=ts,
+                source=self.name,
+                instrument=symbol,
+                name=self.name_symbol,
+                ltp=ltp,
+                ltq=ltq,
+            )
+        except Exception as e:
+            self._logger.error(f"Normalize error for {symbol}: {e}")
+            return None
 
-    # Kite-specific event handlers
-    def _on_ticks(self, ws, ticks):
-        """Handle incoming ticks from Kite."""
-        for t in ticks:
-            tok = t['instrument_token']
-            if tok not in self.symbols:
-                continue
-
-            try:
-                # Use the base class method for processing
-                self._process_raw_quote(t, str(tok))
-                
-            except Exception as e:
-                self._logger.error(f"Error processing tick: {e}")
+    # ------------------------------------------------------------------
+    # KiteTicker callbacks
+    # ------------------------------------------------------------------
 
     def _on_connect(self, ws, response):
-        """Handle ticker connection."""
-        self._logger.info("Ticker connected. Subscribing to symbols ...")
-        ws.subscribe(self.symbols)
-        ws.set_mode(ws.MODE_FULL, self.symbols)
+        self._logger.info("KiteTicker connected – subscribing")
+        ws.subscribe(self._int_symbols)
+        ws.set_mode(ws.MODE_FULL, self._int_symbols)
+
+    def _on_ticks(self, ws, ticks):
+        for tick in ticks:
+            tok = tick.get('instrument_token')
+            if tok not in self._int_symbols:
+                continue
+            event = self._normalize_raw_data(tick, str(tok))
+            if event:
+                self.publish_quote(event)
 
     def _on_close(self, ws, code, reason):
-        """Handle ticker disconnection."""
-        self._logger.warning(f"Ticker closed: {code} {reason}")
+        self._logger.warning(f"KiteTicker closed: {code} {reason}")
         self._is_running = False
 
     def _on_error(self, ws, code, reason):
-        """Handle ticker errors."""
-        self._logger.error(f"Ticker error: {code} {reason}")
-        self._handle_connection_error(Exception(f"Ticker error: {code} {reason}"))
-        ws.subscribe(self.symbols)
-        ws.set_mode(ws.MODE_FULL, self.symbols)
-
-    def _on_close(self, ws, code, reason):
-        """Handle ticker disconnection."""
-        self._logger.warning(f"Ticker closed: {code} {reason}")
-        self._is_running = False
-
-    def _on_error(self, ws, code, reason):
-        """Handle ticker errors."""
-        self._logger.error(f"Ticker error: {code} {reason}")
-        self._handle_connection_error(Exception(f"Ticker error: {code} {reason}"))
+        self._logger.error(f"KiteTicker error: {code} {reason}")

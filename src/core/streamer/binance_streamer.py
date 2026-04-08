@@ -1,155 +1,133 @@
-"""Live Binance trade streamer for real-time market data."""
-import time
+"""Binance WebSocket trade streamer."""
 import json
-import websocket
 import ssl
+import time
+try:
+    import certifi
+    _SSL_OPT = {"ca_certs": certifi.where()}
+except ImportError:
+    _SSL_OPT = {"cert_reqs": ssl.CERT_NONE}
 from datetime import datetime
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 
-from .base_streamer import BaseStreamer
-from src.core.thread_manager import ThreadManager, ThreadPoolType
+import websocket
+
 from src.core.event_bus.events import QuoteEvent
+from .base_streamer import BaseStreamer
+
 
 class BinanceStreamer(BaseStreamer):
-    """Binance WebSocket streamer for trade data from futures."""
+    """Streams real-time trade data from Binance via WebSocket."""
 
-    def __init__(self, symbols: List[str], name_symbol: str, **kwargs):
-        # Initialize BaseStreamer which includes Publisher mixin
-        super().__init__(symbols, name_symbol)
-        self.name_symbol = name_symbol
-        self._ws = None
+    def __init__(
+        self,
+        symbols: List[str],
+        reconnect_attempts: int = 5,
+        reconnect_delay: float = 2.0,
+        stream_timeout: int = 60,
+        testnet: bool = False,
+        **kwargs,
+    ):
+        super().__init__(symbols, name="BinanceStreamer")
+        self.reconnect_attempts = reconnect_attempts
+        self.reconnect_delay = reconnect_delay
+        self.stream_timeout = stream_timeout
+        self.testnet = testnet
+        self._ws: Optional[websocket.WebSocketApp] = None
         self._ws_connected = False
-        
-        # Handle additional configuration from kwargs
-        self.reconnect_attempts = kwargs.get('reconnect_attempts', 3)
-        self.reconnect_delay = kwargs.get('reconnect_delay', 5.0)
-        self.testnet = kwargs.get('testnet', False)
-        
-        self._logger.info(f"BinanceStreamer initialized for trade streaming: {symbols}")
+        self._attempt = 0
+
+    # ------------------------------------------------------------------
+    # BaseStreamer interface
+    # ------------------------------------------------------------------
 
     def _setup_connection(self):
-        """Setup Binance WebSocket connection."""
         if not self.symbols:
-            raise ValueError("No symbols provided for Binance WebSocket.")
-
-        # Only create connection if not already created
-        if self._ws is None:
-            # Create direct trade stream URL like sample_binance.py
-            ws_url = "wss://stream.binance.com:9443/ws/" + "/".join([f"{symbol.lower()}@trade" for symbol in self.symbols])
-                
-            self._logger.info(f"Setting up Binance WebSocket: {ws_url}")
-            
-            # Create WebSocket application exactly like sample_binance.py
-            self._ws = websocket.WebSocketApp(
-                ws_url,
-                on_message=self._on_message,
-                on_error=self._on_error,
-                on_close=self._on_close,
-                on_open=self._on_open
-            )
+            raise ValueError("No symbols provided")
+        streams = "/".join(f"{s.lower()}@trade" for s in self.symbols)
+        base = "wss://testnet.binance.vision/ws" if self.testnet else "wss://stream.binance.com:9443/ws"
+        ws_url = f"{base}/{streams}"
+        self._logger.info(f"Connecting to {ws_url}")
+        self._ws = websocket.WebSocketApp(
+            ws_url,
+            on_message=self._on_message,
+            on_error=self._on_error,
+            on_close=self._on_close,
+            on_open=self._on_open,
+        )
 
     def _run_connection(self):
-        """Run the WebSocket connection."""
-        try:
-            if self._ws and not self._ws_connected:
-                self._logger.info("Starting Binance WebSocket connection...")
-                self._ws.run_forever(sslopt={"cert_reqs": ssl.CERT_NONE})
-            else:
-                self._logger.warning("WebSocket already connected or not initialized")
-        except Exception as e:
-            self._logger.error(f"WebSocket run_forever error: {e}")
-            self._ws_connected = False
-            raise
+        """Run WebSocket with reconnect loop."""
+        for attempt in range(self.reconnect_attempts):
+            if not self._is_running:
+                break
+            try:
+                self._logger.info(f"WebSocket connect attempt {attempt + 1}/{self.reconnect_attempts}")
+                self._ws.run_forever(sslopt=_SSL_OPT)
+                if not self._is_running:
+                    break           # clean stop requested
+            except Exception as e:
+                self._logger.error(f"WebSocket error on attempt {attempt + 1}: {e}")
+
+            if attempt < self.reconnect_attempts - 1 and self._is_running:
+                self._logger.info(f"Reconnecting in {self.reconnect_delay}s...")
+                time.sleep(self.reconnect_delay)
+                self._setup_connection()    # fresh ws object
+
+        if self._is_running:
+            self._logger.error("All reconnect attempts exhausted – streamer stopping")
+            self._is_running = False
 
     def _cleanup_connection(self):
-        """Cleanup WebSocket connection."""
         if self._ws and self._ws_connected:
             try:
                 self._ws.close()
-                self._logger.info("Binance WebSocket connection closed")
             except Exception as e:
-                self._logger.error(f"Error closing WebSocket: {e}")
+                self._logger.error(f"WebSocket close error: {e}")
             finally:
                 self._ws_connected = False
                 self._ws = None
 
-    def _on_message(self, ws, message):
-        """Handle incoming WebSocket messages."""
+    def _normalize_raw_data(self, raw_data: Dict[str, Any], symbol: str) -> Optional[QuoteEvent]:
         try:
-            data = json.loads(message)
-            event = self._normalize_raw_data(data, self.name_symbol)
-            if event:
-                self.publish_quote(event)
-                    
-        except Exception as e:
-            self._logger.error(f"Error parsing Binance message: {e}")
-
-    def _normalize_raw_data(self, raw_data, symbol):
-        """Normalize raw Binance trade data to QuoteEvent."""
-        try:
-            # Extract trade data (like sample_binance.py)
-            price = float(raw_data.get('p', 0))     # Trade price
-            quantity = float(raw_data.get('q', 0))  # Trade quantity
-            trade_symbol = raw_data.get('s', '').upper()  # Symbol
-            trade_time = raw_data.get('T', 0)       # Trade time
-            
-            # Convert timestamp to datetime if it's a number
-            if isinstance(trade_time, (int, float)):
-                timestamp = datetime.fromtimestamp(trade_time / 1000)
-            else:
-                timestamp = datetime.now()
-            
+            price = float(raw_data.get('p', 0))
+            qty = float(raw_data.get('q', 0))
+            trade_symbol = raw_data.get('s', symbol).upper()
+            ts_ms = raw_data.get('T', 0)
+            ts = datetime.fromtimestamp(ts_ms / 1000) if ts_ms else datetime.now()
             return QuoteEvent(
-                timestamp=timestamp,
+                timestamp=ts,
+                source=self.name,
                 instrument=trade_symbol,
-                name=symbol,
+                name=trade_symbol,
                 ltp=price,
-                ltq=quantity,
-                source=self.name
+                ltq=qty,
             )
         except Exception as e:
-            self._logger.error(f"Error normalizing Binance data: {e}")
+            self._logger.error(f"Normalize error: {e}")
             return None
 
-    def _on_open(self, ws):
-        """Handle WebSocket connection open."""
-        self._ws_connected = True
-        self._logger.info("Binance WebSocket connection opened")
+    # ------------------------------------------------------------------
+    # WebSocket callbacks
+    # ------------------------------------------------------------------
 
-    def _on_close(self, ws, close_status_code, close_msg):
-        """Handle WebSocket connection close."""
+    def _on_open(self, ws):
+        self._ws_connected = True
+        self._logger.info("Binance WebSocket opened")
+
+    def _on_close(self, ws, code, msg):
         self._ws_connected = False
-        self._logger.warning(f"Binance WebSocket closed: {close_status_code} - {close_msg}")
+        self._logger.warning(f"Binance WebSocket closed: {code} {msg}")
 
     def _on_error(self, ws, error):
-        """Handle WebSocket errors."""
         self._logger.error(f"Binance WebSocket error: {error}")
-        # TODO: Implement reconnection logic here
+        self._ws_connected = False
 
-    def get_client(self):
-        """Get the Binance client instance (if available)."""
-        return getattr(self, '_client', None)
-    
-
-    def _unsubscribe_from_symbols(self):
-        """Unsubscribe from mark price WebSocket streams."""
+    def _on_message(self, ws, message):
         try:
-            if not self._is_subscribed:
-                return
-            # Create trade stream parameters for unsubscription
-            params = [f"{symbol.lower()}@trade" for symbol in self.symbols]
-            
-            unsubscription_message = {
-                "method": "UNSUBSCRIBE", 
-                "params": params,
-                "id": self._subscription_id + 1
-            }
-            
-            self._logger.info(f"Unsubscribing from Binance mark price streams: {params}")
-            self._ws.send(json.dumps(unsubscription_message))
-            self._is_subscribed = False
-            
+            data = json.loads(message)
+            event = self._normalize_raw_data(data, self.symbols[0] if self.symbols else "")
+            if event:
+                self.publish_quote(event)
         except Exception as e:
-            self._logger.error(f"Error unsubscribing from symbols: {e}")
-
-
+            self._logger.error(f"Message parse error: {e}")

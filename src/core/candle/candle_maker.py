@@ -6,8 +6,10 @@ from typing import Dict, Any  # Add missing imports
 from src.logger_factory import get_logger
 import os
 import traceback
+from src.system_config_manager import SystemConfigManager
 
-import pandas as pd
+
+# import pandas as pd
 # from src.core.plotting.live_chart_server import LiveChartServer
 from src.core.event_bus.mixins import Publisher, Subscriber
 from src.core.event_bus.events import QuoteEvent, CandleGenerated
@@ -26,7 +28,8 @@ class CandleMaker(Publisher, Subscriber):
         self._current: dict = {}
         self._vwap_data = defaultdict(lambda: {"cum_tp_vol": 0.0, "cum_vol": 0.0})
         self._logger = get_logger("CandleMaker")
-        self.timeframe = "5min"  # Add missing timeframe attribute
+        self.system_config = SystemConfigManager()
+        self.timeframe = self.system_config.get("candle_maker.default_timeframe")
 
         # ensure header
         if not os.path.exists(self._csv_file):
@@ -49,13 +52,13 @@ class CandleMaker(Publisher, Subscriber):
         volume = event.ltq or 0
 
         candle_time = timestamp.replace(second=0, microsecond=0)
-        candle_time = candle_time.replace(minute=(candle_time.minute // 1) * 1)
+        candle_time = candle_time.replace(minute=(candle_time.minute // self.timeframe) * self.timeframe)
 
         current = self._current.get(symbol)
 
         if current is None or current['timestamp'] != candle_time:
             if current:
-                self._logger.debug(f"Finalizing candle for {symbol} at {current['timestamp']}")
+                # self._logger.debug(f"Finalizing candle for {symbol} at {current['timestamp']}")
                 self._finalize(symbol, current)
                 self._logger.debug(f"Creating new candle for {symbol} at {candle_time}")
             current = {
@@ -87,24 +90,24 @@ class CandleMaker(Publisher, Subscriber):
     def _finalize(self, symbol: str, candle: Dict[str, Any]):
         """Finalize and publish a completed candle."""
         try:
-            self._logger.debug(f"Finalizing candle for {symbol}: {candle}")
+            # self._logger.debug(f"Finalizing candle for {symbol}: {candle}")
             
             # Create CandleGenerated event with all required parameters including source
             candle_event = CandleGenerated(
                 timestamp=candle['timestamp'],
                 symbol=symbol,
-                timeframe=self.timeframe,
+                timeframe=str(self.timeframe),
                 open=candle['open'],
                 high=candle['high'],
                 low=candle['low'],
                 close=candle['close'],
                 volume=candle['volume'],
-                vwap=candle.get('vwap', 0.0),
+                vwap=candle.get('vwap'),
                 source="CandleMaker"  # Add missing source parameter
             )
             
             self.publish_event(candle_event)
-            self._logger.info(f"Published candle for {symbol}: O={candle['open']:.2f} H={candle['high']:.2f} L={candle['low']:.2f} C={candle['close']:.2f} V={candle['volume']:.2f}")
+            self._logger.info(f"Published candle for {symbol}: O={candle['open']:.2f} H={candle['high']:.2f} L={candle['low']:.2f} C={candle['close']:.2f} V={candle['volume']:.2f} VWAP={candle['vwap']:.2f}")
             
             # Write to CSV
             self._write_to_csv(candle)
