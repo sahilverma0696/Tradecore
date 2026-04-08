@@ -124,7 +124,7 @@ def create_and_register_components(system_config, trading_config):
         
         logger.info(f"   ⚡ Creating {exec_type} executor...")
         components['executor'] = ExecutorFactory.create_executor(
-            broker=exec_type,
+            executor_type=exec_type,
             config=config_data
         )
         

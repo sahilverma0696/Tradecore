@@ -1,92 +1,159 @@
-from typing import Dict, Any, Optional
-from .base_executor import BaseExecutor
+"""Factory for creating order executors."""
+from typing import Any, Dict, List
+
 from src.logger_factory import get_logger
-
-# Import broker executors with fallback handling
-try:
-    from .zerodha_executor import ZerodhaExecutor
-except ImportError:
-    ZerodhaExecutor = None
-
-try:
-    from .binance_executor import BinanceExecutor
-except ImportError:
-    BinanceExecutor = None
-
-try:
-    from .upstox_executor import UpstoxExecutor
-except ImportError:
-    UpstoxExecutor = None
+from .base_executor import BaseExecutor
 
 
 class ExecutorFactory:
-    """Factory for creating executor instances based on broker type."""
-    
-    EXECUTOR_CLASSES = {}
-    
-    # Add broker executors if available
-    if ZerodhaExecutor:
-        EXECUTOR_CLASSES['zerodha'] = ZerodhaExecutor
-    if BinanceExecutor:
-        EXECUTOR_CLASSES['binance'] = BinanceExecutor
-    if UpstoxExecutor:
-        EXECUTOR_CLASSES['upstox'] = UpstoxExecutor
-    
+    """
+    Registry + factory for executor creation.
+
+    Executors are registered at module import time. Credentials are read
+    from trading_config.json; system_config carries only behaviour config.
+
+    The special type 'paper' creates any executor with paper_trade=True
+    and no broker client — useful for simulation.
+    """
+
+    _registry: Dict[str, type] = {}
+    _logger = get_logger("ExecutorFactory")
+
+    @classmethod
+    def register(cls, name: str, klass):
+        if not issubclass(klass, BaseExecutor):
+            raise ValueError(f"{klass} must subclass BaseExecutor")
+        cls._registry[name.lower()] = klass
+        cls._logger.info(f"Registered executor: {name}")
+
     @classmethod
     def create_executor(
-        cls, 
-        broker: str, 
-        client=None, 
-        paper_trade: bool = True, 
-        config: Optional[Dict[str, Any]] = None
+        cls,
+        executor_type: str,
+        config: Dict[str, Any] = None,
     ) -> BaseExecutor:
         """
-        Create an executor instance for the specified broker.
-        
-        Args:
-            broker: Broker name ('mock', 'zerodha', 'binance', 'upstox')
-            client: Broker-specific client instance
-            paper_trade: Whether to enable paper trading
-            config: Broker-specific configuration
-            
-        Returns:
-            BaseExecutor: Executor instance for the specified broker
-            
-        Raises:
-            ValueError: If broker is not supported
+        Create an executor.
+
+        executor_type  – 'paper', 'binance', 'zerodha', 'upstox'
+        config         – the executor-type block from system_config
         """
-        broker = broker.lower()
-        
-        if broker not in cls.EXECUTOR_CLASSES:
-            supported_brokers = ', '.join(cls.EXECUTOR_CLASSES.keys())
-            raise ValueError(f"Unsupported broker: {broker}. Supported brokers: {supported_brokers}")
-        
-        executor_class = cls.EXECUTOR_CLASSES[broker]
-        logger = get_logger("ExecutorFactory")
-        
-        logger.info(f"Creating {broker} executor - Paper Trade: {paper_trade}")
-        
-        # Handle MockExecutor which doesn't need client parameter
-        
-        return executor_class(
-            client=client,
-            paper_trade=paper_trade,
-            logger=logger,
-            config=config or {}
-        )
-    
+        key = executor_type.lower()
+
+        # 'paper' is a virtual type: any executor run in paper-trade mode
+        # We use BinanceExecutor (no client needed for paper) as the paper impl.
+        if key == "paper":
+            return cls._build_paper(config or {})
+
+        if key not in cls._registry:
+            raise ValueError(
+                f"Unknown executor '{executor_type}'. "
+                f"Available: {list(cls._registry)}"
+            )
+
+        config = config or {}
+        klass = cls._registry[key]
+        creds = cls._get_credentials(key)
+
+        try:
+            return cls._build(key, klass, config, creds)
+        except Exception as e:
+            cls._logger.error(f"Failed to create {executor_type} executor: {e}")
+            raise
+
     @classmethod
-    def get_supported_brokers(cls) -> list:
-        """Get list of supported brokers."""
-        return list(cls.EXECUTOR_CLASSES.keys())
-    
+    def _build_paper(cls, config: Dict[str, Any]) -> BaseExecutor:
+        """Paper executor — no real broker client, always paper_trade=True."""
+        # Use BinanceExecutor as the paper implementation (client=None → paper path)
+        key = "binance"
+        if key in cls._registry:
+            klass = cls._registry[key]
+        else:
+            # Fallback: try any registered executor
+            if not cls._registry:
+                raise RuntimeError("No executors registered; cannot create paper executor")
+            klass = next(iter(cls._registry.values()))
+
+        return klass(client=None, paper_trade=True, config=config)
+
     @classmethod
-    def register_executor(cls, broker: str, executor_class: type):
-        """Register a new executor class for a broker."""
-        if not issubclass(executor_class, BaseExecutor):
-            raise ValueError("Executor class must inherit from BaseExecutor")
-        
-        cls.EXECUTOR_CLASSES[broker.lower()] = executor_class
-        
-        logger = get_logger("ExecutorFactory")
-        logger.info(f"Registered new executor for broker: {broker}")
+    def _build(cls, key: str, klass, config: Dict[str, Any], creds: Dict[str, Any]) -> BaseExecutor:
+        if key == "binance":
+            try:
+                from binance.client import Client
+                client = Client(
+                    api_key=creds.get("api_key", ""),
+                    api_secret=creds.get("api_secret", ""),
+                    testnet=config.get("test_mode", True),
+                )
+            except Exception:
+                client = None
+                cls._logger.warning("Binance client unavailable — falling back to paper mode")
+            return klass(client=client, paper_trade=(client is None), config=config)
+
+        if key == "zerodha":
+            try:
+                from kiteconnect import KiteConnect
+                client = KiteConnect(api_key=creds.get("api_key", ""))
+                client.set_access_token(creds.get("access_token", ""))
+            except Exception:
+                client = None
+                cls._logger.warning("Zerodha client unavailable — falling back to paper mode")
+            return klass(client=client, paper_trade=(client is None), config=config)
+
+        if key == "upstox":
+            try:
+                import upstox_client
+                cfg = upstox_client.Configuration()
+                cfg.access_token = creds.get("access_token", "")
+                client = upstox_client.OrderApiV3(upstox_client.ApiClient(cfg))
+            except Exception:
+                client = None
+                cls._logger.warning("Upstox client unavailable — falling back to paper mode")
+            return klass(client=client, paper_trade=(client is None), config=config)
+
+        # Generic fallback
+        return klass(client=None, paper_trade=True, config=config)
+
+    @classmethod
+    def _get_credentials(cls, broker: str) -> Dict[str, Any]:
+        try:
+            from src.config_manager import ConfigManager
+            return ConfigManager().get_value(f"credentials.{broker}") or {}
+        except Exception:
+            return {}
+
+    @classmethod
+    def available(cls) -> List[str]:
+        return list(cls._registry) + ["paper"]
+
+    @classmethod
+    def is_available(cls, executor_type: str) -> bool:
+        return executor_type.lower() in cls._registry or executor_type.lower() == "paper"
+
+
+# ---------------------------------------------------------------------------
+# Auto-register built-in executors
+# ---------------------------------------------------------------------------
+
+def _register_builtins():
+    try:
+        from .binance_executor import BinanceExecutor
+        ExecutorFactory.register("binance", BinanceExecutor)
+    except Exception as e:
+        get_logger("ExecutorFactory").debug(f"BinanceExecutor unavailable: {e}")
+
+    try:
+        from .zerodha_executor import ZerodhaExecutor
+        ExecutorFactory.register("zerodha", ZerodhaExecutor)
+    except Exception as e:
+        get_logger("ExecutorFactory").debug(f"ZerodhaExecutor unavailable: {e}")
+
+    try:
+        from .upstox_executor import UpstoxExecutor
+        ExecutorFactory.register("upstox", UpstoxExecutor)
+    except Exception as e:
+        get_logger("ExecutorFactory").debug(f"UpstoxExecutor unavailable: {e}")
+
+
+_register_builtins()
