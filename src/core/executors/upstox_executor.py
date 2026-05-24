@@ -23,7 +23,7 @@ class UpstoxExecutor(BaseExecutor):
             "product": self.product,
             "validity": self.validity,
             "price": 0,
-            "tag": f"VWAP_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
+            "tag": f"TC_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
             "instrument_token": self._get_instrument_token(symbol),
             "order_type": "MARKET" if order_type == "MARKET" else "LIMIT",
             "transaction_type": side,

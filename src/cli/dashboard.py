@@ -132,7 +132,7 @@ class TradingDashboard:
         row = 0
 
         # ── header ──
-        title = f" VWAP Dashboard  {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}  [q] quit "
+        title = f" Tradecore Dashboard  {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}  [q] quit "
         self._safe_addstr(stdscr, row, 0, title.ljust(width), H | B)
         row += 1
 
@@ -224,7 +224,7 @@ class TradingDashboard:
 
     def start_simple_dashboard(self):
         self.running = True
-        print("VWAP Trading Dashboard — Ctrl+C to exit\n")
+        print("Tradecore Trading Dashboard — Ctrl+C to exit\n")
         try:
             while self.running:
                 self._print_simple_dashboard()
@@ -239,7 +239,7 @@ class TradingDashboard:
         now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         uptime = str(datetime.now() - self.start_time).split('.')[0]
         print("=" * 90)
-        print(f"  VWAP Dashboard  {now}  |  Uptime: {uptime}")
+        print(f"  Tradecore Dashboard  {now}  |  Uptime: {uptime}")
         print("=" * 90)
 
         # ── quotes ──

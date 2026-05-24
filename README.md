@@ -1,6 +1,8 @@
-# VWAP Algorithmic Trading System
+# Tradecore
 
-Event-driven algorithmic trading system built around a VWAP-cross strategy. Streams live market data, generates candles, fires entry signals, manages positions with a peak-retrace exit algorithm, and logs all trade activity to CSV + SQLite.
+Event-driven algorithmic trading engine. Streams live market data, aggregates ticks into OHLCV candles, fires entry signals from a pluggable strategy, manages positions with a peak-retrace exit algorithm, and logs all trade activity to CSV + SQLite.
+
+The entry strategy is swappable — VWAP cross is the default, but any signal generator that publishes `EntrySignal` integrates without touching the rest of the system.
 
 ---
 
@@ -23,13 +25,13 @@ Event-driven algorithmic trading system built around a VWAP-cross strategy. Stre
 
 ## Architecture
 
-The system is composed of loosely-coupled components connected via a pub-sub `EventBus`. No component holds a reference to another — they communicate only through typed events.
+Components are loosely coupled via a pub-sub `EventBus`. No component holds a reference to another — they communicate only through typed events.
 
 ```
 MarketData (Streamer)
         │  QuoteEvent
         ▼
-   CandleMaker  ──── CandleGenerated ──▶  VwapStrategy
+   CandleMaker  ──── CandleGenerated ──▶  Strategy (e.g. VwapStrategy)
         │                                       │ EntrySignal
         │ QuoteEvent                            ▼
         └──────────────────────────────▶  OrderManager
@@ -45,7 +47,7 @@ MarketData (Streamer)
 |---|---|
 | `Streamer` | Connects to market data feed, publishes `QuoteEvent` |
 | `CandleMaker` | Aggregates ticks into OHLCV candles, publishes `CandleGenerated` |
-| `VwapStrategy` | Detects VWAP cross, publishes `EntrySignal` |
+| `Strategy` | Detects entry conditions, publishes `EntrySignal` |
 | `OrderManager` | Manages open positions, calls `ExitManager` on every tick |
 | `ExitManager` | Peak-retrace exit logic, publishes `OrderEvent(type=FULL)` |
 | `Executor` | Sends orders to broker (or simulates in paper mode) |
@@ -87,8 +89,14 @@ OrderEvent
 
 ```bash
 git clone <repo-url>
-cd vwap
+cd tradecore
 pip install -r requirements.txt
+```
+
+**Copy the config template and fill in your credentials:**
+```bash
+cp trading_config.example.json trading_config.json
+# then edit trading_config.json with your API keys
 ```
 
 **macOS — SSL certificates (required for Binance WebSocket):**
@@ -113,7 +121,7 @@ Controls infrastructure — streamer, executor, thread pools, logging.
   },
   "logging": {
     "level": "INFO",           // DEBUG | INFO | WARNING | ERROR
-    "file_logging": true,      // write to logs/
+    "file_logging": true,
     "log_directory": "logs",
     "console_logging": true
   },
@@ -149,7 +157,7 @@ Controls infrastructure — streamer, executor, thread pools, logging.
     "persist_candles":    true
   },
   "trading_session": {
-    "start_time": "09:15",     // IST — no orders outside this window
+    "start_time": "09:15",     // IST
     "end_time":   "15:30",
     "timezone":   "Asia/Kolkata"
   }
@@ -158,20 +166,20 @@ Controls infrastructure — streamer, executor, thread pools, logging.
 
 ### `trading_config.json`
 
-Controls strategy parameters, symbols, quantities, and credentials.
+Controls strategy parameters, symbols, quantities, and credentials. **This file is gitignored** — copy from `trading_config.example.json`.
 
 ```jsonc
 {
-  "symbols": ["btcusdt"],      // list of instruments to stream and trade
+  "symbols": ["btcusdt"],      // instruments to stream and trade
 
-  "market_close_time": "15:30", // IST — triggers MARKET_CLOSE exit
+  "market_close_time": "15:30",
 
   // Exit algorithm parameters
-  "step_pct":      2.0,        // profit level step in % (levels: 2, 4, 6, 8, 10)
-  "max_level_pct": 10.0,       // immediate exit if move reaches this %
-  "stoploss_pct":  2.0,        // hard stop distance from entry in %
+  "step_pct":      2.0,        // profit level step % (levels: 2, 4, 6, 8, 10)
+  "max_level_pct": 10.0,       // immediate exit when move reaches this %
+  "stoploss_pct":  2.0,        // hard stop distance from entry %
 
-  // Legacy stop parameters (used by OrderObject for stop price tracking)
+  // Legacy stop parameters (used by OrderObject)
   "trail":          0.03,
   "loss_stop_low":  0.96,
   "loss_stop_high": 1.06,
@@ -184,9 +192,9 @@ Controls strategy parameters, symbols, quantities, and credentials.
   },
 
   "execution": {
-    "delta_sell":          0.02,  // slippage offset for SELL orders
-    "delta_buy":           0.04,  // slippage offset for BUY orders
-    "max_retries":         3,
+    "delta_sell": 0.02,
+    "delta_buy":  0.04,
+    "max_retries": 3,
     "retry_delay_seconds": 1
   },
 
@@ -198,16 +206,16 @@ Controls strategy parameters, symbols, quantities, and credentials.
 }
 ```
 
-**Paper trading:** leave all credential fields empty and set `executor.active = "paper"`. The system runs fully without broker connectivity.
+**Paper trading:** leave credential fields empty and set `executor.active = "paper"`.
 
 ---
 
 ## Running
 
 ```bash
-make run          # start the trading system
+make run          # start the trading engine
 make cli          # open curses trading dashboard (live orders, P&L, stops)
-make cli-simple   # same dashboard without curses (plain text, useful for logs)
+make cli-simple   # same dashboard without curses (plain text, pipe-friendly)
 make sys          # open curses system monitor (event wiring + live event stream)
 make clean        # wipe logs and IPC files
 ```
@@ -217,10 +225,10 @@ make clean        # wipe logs and IPC files
 # Terminal 1
 make run
 
-# Terminal 2 (order/trade view)
+# Terminal 2 — order/trade view
 make cli
 
-# Terminal 3 (system events view)
+# Terminal 3 — system events view
 make sys
 ```
 
@@ -242,11 +250,11 @@ Keys: `q` to quit.
 
 ### Simple Dashboard (`make cli-simple`)
 
-Same information, plain text output — pipe-friendly.
+Same information, plain text output.
 
 ### System Monitor (`make sys`)
 
-Shows infrastructure state, not trade state.
+Shows infrastructure state — event wiring map and live event stream.
 
 ```
 EVENT WIRING
@@ -255,11 +263,10 @@ EVENT WIRING
   EntrySignal         →  OrderManager
   OrderEvent          →  Executor
 
-LIVE EVENT STREAM  (last N events, showing M)
+LIVE EVENT STREAM
   Time          Type                  Source                Details
   09:15:03.01   CandleGenerated       CandleMaker           btcusdt  tf=3  O=65000  C=65200  VWAP=65100
-  09:15:03.02   EntrySignal           VwapStrategy          btcusdt  BUY  @ 65200.0000  strat=VWAP
-  ...
+  09:15:03.02   EntrySignal           VwapStrategy          btcusdt  BUY  @ 65200.0000  strat=VWAPCross
 ```
 
 Keys: `q` to quit.
@@ -268,22 +275,24 @@ Keys: `q` to quit.
 
 ## Strategy
 
-**VWAP Cross** — entry triggered when price crosses VWAP at candle close.
+**Default: VWAP Cross** — entry triggered when price crosses VWAP at candle close.
 
 | Candle | Condition | Signal |
 |---|---|---|
-| `open < VWAP` and `close > VWAP` | Price moved above VWAP | BUY |
-| `open > VWAP` and `close < VWAP` | Price moved below VWAP | SELL |
+| `open < VWAP` and `close > VWAP` | Price crossed above VWAP | BUY |
+| `open > VWAP` and `close < VWAP` | Price crossed below VWAP | SELL |
 
-- One position per instrument at a time — duplicate signals suppressed.
-- Positions cleared on `OrderEvent(type=FULL)` (exit) or `type=SWITCH` (direction flip).
-- VWAP is calculated per candle using cumulative `(price × volume) / cumulative_volume`.
+- One position per instrument — duplicate signals suppressed.
+- Position cleared on `OrderEvent(type=FULL)` (exit) or `type=SWITCH` (direction flip).
+- VWAP calculated cumulatively: `sum(price × volume) / sum(volume)`.
+
+**Adding a custom strategy:** subclass `Subscriber` + `Publisher`, subscribe to `CandleGenerated` (or `QuoteEvent`), publish `EntrySignal`. No other changes needed.
 
 ---
 
 ## Exit Algorithm
 
-**Peak-retrace-to-last-cleared-level** — mirrors the backtest logic exactly.
+**Peak-retrace-to-last-cleared-level** — mirrors backtest logic exactly.
 
 ### Levels
 
@@ -292,7 +301,7 @@ With default config (`step_pct=2, max_level_pct=10`):
 Levels: [2%, 4%, 6%, 8%, 10%]
 ```
 
-A level is "cleared" when the peak move from entry has exceeded it.
+A level is "cleared" when peak move from entry has exceeded it.
 
 ### Exit priority (checked on every tick):
 
@@ -309,7 +318,7 @@ Exit immediately at the max level price (not LTP)
 
 **3. RETRACE** — price clears level N, then retraces back through it
 ```
-Find highest cleared level → compute its exact price → if LTP crosses back → exit at level price
+Find highest cleared level → compute exact price → if LTP crosses back → exit at level price
 ```
 
 **4. MARKET_CLOSE** — current IST time ≥ `market_close_time`
@@ -327,22 +336,13 @@ L2    = 67600  (+4%)
 ...
 L5    = 71500  (+10%)
 
-Scenario A — HARD_STOP:
-  ltp drops to 63700 → exit at 63700
-
-Scenario B — MAX_LEVEL:
-  ltp reaches 71500 → exit immediately at 71500
-
-Scenario C — RETRACE:
-  ltp peaks at 67800 (cleared L2=67600)
-  ltp retraces back to 66300 (L1, but cleared level is L2)
-  ltp falls to 67600 → exit at 67600  ← last cleared level price
-
-Scenario D — MARKET_CLOSE:
-  15:30 IST reached, open position → exit at current LTP
+Scenario A — HARD_STOP:   ltp drops to 63700 → exit at 63700
+Scenario B — MAX_LEVEL:   ltp reaches 71500 → exit at 71500
+Scenario C — RETRACE:     ltp peaks at 67800 (cleared L2), retraces to 67600 → exit at 67600
+Scenario D — MARKET_CLOSE: 15:30 IST → exit at current LTP
 ```
 
-Exit price is always the **level price**, not LTP — ensures consistent fills at well-defined levels.
+Exit price is always the **level price**, not LTP.
 
 ---
 
@@ -352,15 +352,13 @@ Exit price is always the **level price**, not LTP — ensures consistent fills a
 
 Path: `data/{streamer}/{YYYY}/{MM}/ticks_{YYYYMMDD}.db`
 
-Example: `data/binance/2025/01/ticks_20250115.db`
-
 ```sql
 CREATE TABLE ticks (
     id        INTEGER PRIMARY KEY AUTOINCREMENT,
-    ts        TEXT NOT NULL,        -- ISO 8601
-    symbol_id TEXT NOT NULL,        -- e.g. "btcusdt"
-    ltp       REAL NOT NULL,        -- last traded price
-    ltq       REAL                  -- last traded quantity
+    ts        TEXT NOT NULL,
+    symbol_id TEXT NOT NULL,
+    ltp       REAL NOT NULL,
+    ltq       REAL
 );
 CREATE INDEX idx_ticks_symbol_ts ON ticks (symbol_id, ts);
 ```
@@ -374,44 +372,42 @@ WAL mode enabled — safe for concurrent reads by backtest scripts.
 ```json
 [
   {
-    "exit_time":    "2025-01-15T10:23:45",
-    "entry_time":   "2025-01-15T09:15:03",
-    "duration_s":   4122,
-    "symbol":       "btcusdt",
-    "instrument":   "btcusdt",
-    "side":         "BUY",
-    "quantity":     1,
-    "entry_price":  65000.0,
-    "exit_price":   66300.0,
-    "pnl":          1300.0,
-    "pnl_pct":      2.0,
-    "peak_pct":     2.1,
-    "min_pct":      -0.3,
-    "exit_reason":  "RETRACE_L2pct"
+    "exit_time":   "2025-01-15T10:23:45",
+    "entry_time":  "2025-01-15T09:15:03",
+    "duration_s":  4122,
+    "symbol":      "btcusdt",
+    "side":        "BUY",
+    "quantity":    1,
+    "entry_price": 65000.0,
+    "exit_price":  66300.0,
+    "pnl":         1300.0,
+    "pnl_pct":     2.0,
+    "peak_pct":    2.1,
+    "min_pct":     -0.3,
+    "exit_reason": "RETRACE_L2pct"
   }
 ]
 ```
 
 ### Order CSV Log
 
-`logs/orders.csv` — append-only log of all exits, one row per closed order.
+`logs/orders.csv` — append-only, one row per closed order.
 
 Columns: `exit_time, entry_time, duration_s, symbol, instrument, side, quantity, entry_price, exit_price, pnl, pnl_pct, peak_pct, min_pct, exit_reason`
 
 ### IPC Files (live state for dashboards)
 
-Written atomically via `tmp → rename`. Never read stale partial writes.
+Written atomically via `tmp → rename`.
 
 | File | Content |
 |---|---|
-| `data/live_quotes.json` | Latest LTP per symbol (up to 10) |
-| `data/live_candles.json` | Latest completed candle per symbol (up to 5) |
-| `data/live_events.json` | Most recent non-quote event |
+| `data/live_quotes.json` | Latest LTP per symbol |
+| `data/live_candles.json` | Latest completed candle per symbol |
 | `data/live_events_log.json` | Rolling buffer of last 200 events |
 | `data/live_system.json` | Event wiring map + session metadata |
-| `data/live_order.json` | All open positions (written by OrderManager) |
+| `data/live_order.json` | All open positions |
 
-All IPC files are deleted on system startup — dashboards that open before the system starts show "waiting..." until the system writes.
+All IPC files are deleted on system startup.
 
 ---
 
@@ -419,13 +415,13 @@ All IPC files are deleted on system startup — dashboards that open before the 
 
 | Broker | Streamer | Executor | Notes |
 |---|---|---|---|
-| **Binance** | `binance` | `binance` | WebSocket streams, certifi SSL fix for macOS |
-| **Zerodha** | `zerodha` | `zerodha` | Kite Connect, needs `access_token` |
+| **Binance** | `binance` | `binance` | WebSocket streams; certifi SSL fix for macOS |
+| **Zerodha** | `zerodha` | `zerodha` | Kite Connect (`pip install kiteconnect`) |
 | **Upstox** | `upstox` | `upstox` | Upstox SDK v2 |
-| **Offline** | `offline` | — | Simulated price walk, no network needed |
+| **Offline** | `offline` | — | Simulated price walk, no network |
 | **Paper** | any | `paper` | Simulated execution, real market data |
 
-**To switch broker:** change `streamer.active` and `executor.active` in `system_config.json`.
+**Switch broker:** change `streamer.active` and `executor.active` in `system_config.json`.
 
 **Paper trading with live data (most common for testing):**
 ```json
@@ -433,7 +429,7 @@ All IPC files are deleted on system startup — dashboards that open before the 
 "executor": { "active": "paper" }
 ```
 
-**Fully offline (no network):**
+**Fully offline:**
 ```json
 "streamer": { "active": "offline" },
 "executor": { "active": "paper" }
@@ -445,30 +441,24 @@ All IPC files are deleted on system startup — dashboards that open before the 
 
 ```bash
 make test              # all tests
-make test-streamer     # streamer factory + lifecycle tests (pytest)
-make test-executor     # executor factory + paper trading tests (pytest)
-make test-eventbus     # event bus pub-sub tests (unittest)
+make test-streamer     # streamer factory + lifecycle tests
+make test-executor     # executor factory + paper trading tests
+make test-eventbus     # event bus pub-sub tests
 ```
-
-Tests cover:
-- Streamer factory instantiation and normalization
-- Streamer start/stop lifecycle
-- Executor factory, paper trading, event dispatch
-- EventBus subscribe/publish/unsubscribe, history, wiring map
 
 ---
 
 ## Project Structure
 
 ```
-vwap/
+tradecore/
 ├── src/
-│   ├── main.py                        # system entry point
+│   ├── main.py                        # engine entry point
 │   ├── config_manager.py              # trading_config.json singleton
 │   ├── system_config_manager.py       # system_config.json singleton
 │   ├── logger_factory.py              # named logger with file + console
 │   ├── time_control.py                # IST time utilities
-│   ├── global_enum.py                 # ORDERSTATE, SIDE, etc.
+│   ├── global_enum.py                 # ORDERSTATE enum
 │   ├── core/
 │   │   ├── event_bus/
 │   │   │   ├── event_bus.py           # pub-sub broker singleton
@@ -499,14 +489,20 @@ vwap/
 │   ├── data_store/
 │   │   └── quote_event_db_subscriber.py  # tick → SQLite
 │   └── cli/
-│       ├── cli_main.py                # trading dashboard entry point
+│       ├── cli_main.py                # dashboard entry point
 │       ├── dashboard.py               # curses order/P&L view
-│       └── sys_cli.py                 # curses system events view
+│       ├── sys_cli.py                 # curses system events view
+│       └── demo_data.py               # IPC-based demo data generator
 ├── tests/
 │   ├── test_event_bus.py
+│   ├── test_config_manager.py
 │   ├── test_streamer.py
-│   └── test_executor.py
-├── trading_config.json
+│   ├── test_executor.py
+│   ├── test_candle_maker.py
+│   ├── test_order_manager.py
+│   ├── test_vwap_flow.py
+│   └── test_thread_manager.py
+├── trading_config.example.json        # copy to trading_config.json and add credentials
 ├── system_config.json
 ├── Makefile
 └── requirements.txt

@@ -1,78 +1,60 @@
-from typing import Dict, Any
+from typing import Dict
 from datetime import datetime
 import json
 import os
-from src.core.event_bus import Subscriber, Publisher, EntrySignal, ExitSignal, OrderExecuted
+from src.core.event_bus import Subscriber, Publisher, EntrySignal
 from src.core.event_bus.events import CandleGenerated, QuoteEvent, OrderEvent
 from src.logger_factory import get_logger
 from src.core.order_object import OrderObject
 from src.core.order_logger import OrderLogger
 from src.config_manager import ConfigManager
-from src.core.thread_manager import ThreadManager, ThreadPoolType
+from src.core.thread_manager import ThreadManager
+from src.global_enum import ORDERSTATE
 import src.basic as basic
-from src.global_enum import *
+
 
 class OrderManager(Subscriber, Publisher):
-    """Manages order lifecycle and execution."""
-    
+    """Manages order lifecycle: entry, tick updates, exit, and IPC writes."""
+
     def __init__(self, log_dir: str = "logs"):
-        super().__init__()  # Initialize both mixins
-        
-        self._orders: Dict[str, OrderObject] = {}   # symbol -> OrderObject, unique by ID, State
+        super().__init__()
+
+        self._orders: Dict[str, OrderObject] = {}
         self._logger = get_logger("OrderManager")
         self._order_logger = OrderLogger(log_dir)
-        self._handlers = []  # callback for order execution
-        
-        # Thread manager for async operations
         self._thread_manager = ThreadManager()
-        
-        # IPC file for live order data
         self._live_order_file = "data/live_order.json"
 
-        # Load trading configuration via ConfigManager
         self._config_manager = ConfigManager()
         self._reload_trading_config(self._config_manager.get())
-
-        # Re-read config on hot-reload so new trail/stops take effect next order
         self._config_manager.register_watcher(self._reload_trading_config)
-
-        self._logger.info("OrderManager initialized")
 
         self.subscribe_to_event(EntrySignal, self.on_entry_signal)
         self.subscribe_to_event(QuoteEvent, self._on_ltp_update)
         self.subscribe_to_event(CandleGenerated, self._handle_update_candle)
-        self._logger.info("OrderManager subscribed to EntrySignal, QuoteEvent, CandleGenerated")
-      
+        self._logger.info("OrderManager initialized")
+
     def _reload_trading_config(self, config: dict) -> None:
-        """Extract and cache the values we need; called on init and hot-reload."""
-        self._trail        = float(config.get('trail', 0.03))
+        """Cache config values; called on init and hot-reload. New values apply to the next order."""
+        self._trail          = float(config.get('trail', 0.03))
         self._loss_stop_low  = float(config.get('loss_stop_low', 0.96))
         self._loss_stop_high = float(config.get('loss_stop_high', 1.06))
-        # Resolve quantity: per-symbol > default_quantity (always a number)
-        self._quantities   = config.get('quantities', {})
-        self._default_qty  = int(config.get('default_quantity', 75))
-    
-    
+        self._quantities     = config.get('quantities', {})
+        self._default_qty    = int(config.get('default_quantity', 75))
+
     def _handle_entry_signal(self, event: EntrySignal):
-        """Handle entry signal from strategy"""
         symbol = event.symbol
         side = event.direction
 
-        # Check if order already exists
-        existing_order = self._orders.get(symbol)
-        
-        if existing_order and  existing_order.state == ORDERSTATE.OPEN:
-            if existing_order.get_side() != side:
-                # Closing order in opposite direction
-                # EXIT CASE 1 : Direction switch, profit negative
-                # this is the only case where an exit signal is generated from entry signal
-                self._logger.info(f"Switching direction for {symbol} from {existing_order.get_side()} to {side}")
-                self._execute_order(existing_order,type ='SWITCH')
+        existing = self._orders.get(symbol)
+        if existing and existing.state == ORDERSTATE.OPEN:
+            if existing.get_side() != side:
+                self._logger.info(f"Direction switch for {symbol}: {existing.get_side()} → {side}")
+                self._execute_order(existing, order_type='SWITCH')
             else:
-                self._logger.info(f"Duplicate entry signal, same side for {symbol}, ignoring.")
+                self._logger.info(f"Duplicate entry signal for {symbol} ({side}), ignoring")
                 return
-            
-        # Create new order
+
         quantity = int(self._quantities.get(symbol, self._default_qty))
         try:
             order = OrderObject(
@@ -83,91 +65,62 @@ class OrderManager(Subscriber, Publisher):
                 quantity=quantity,
                 candle=event.candle,
                 loss_stop_low=self._loss_stop_low,
-                loss_stop_high=self._loss_stop_high
+                loss_stop_high=self._loss_stop_high,
             )
-            
         except Exception as e:
-            self._logger.error(f"ORDER OBJECT CREATION FAIL: {symbol}: {e}")
+            self._logger.error(f"Failed to create OrderObject for {symbol}: {e}")
             return
-        
-        self._execute_order(order,type="ENTRY")
-        self._orders[symbol] = order # ?to be made atomic: no, event based system in market order, system expects liquidity in the market
-        self._logger.info(f"Created order {symbol} {side} @ {event.price}")
+
+        self._orders[symbol] = order
+        self._execute_order(order, order_type="ENTRY")
         self._order_logger.log_entry(order)
-        
-        # Update live order IPC file
-        if order.state == ORDERSTATE.OPEN:
-            self._write_live_order_data()
-        
+        self._write_live_order_data()
 
-    def _execute_order(self, order: OrderObject,type:str):
-        
-        
+    def _execute_order(self, order: OrderObject, order_type: str):
         side = order.get_side()
-        if type == 'EXIT':
-            '''
-            This only sends exit signal for change in direction signal, honestly should not be executed since 
-            Stop loss should be able to stop it, if there is an event fired from this, it is a problem
-            '''
-            if order.get_side() == "BUY":
-                side = "SELL"
-            else:
-                side = "BUY"
+        if order_type in ('EXIT', 'SWITCH'):
+            side = "SELL" if side == "BUY" else "BUY"
             order.state = ORDERSTATE.CLOSE
-            
 
-        orderEvent = OrderEvent(
+        self.publish_event(OrderEvent(
             timestamp=order._timestamp,
             order_id=order.id,
             instrument=order.get_instrument(),
             side=side,
             price=order.ltp if order.ltp != 0 else order.const_entry_price,
-            strategy="VWAP",
-            type=type,
-            candle= order.current_candle,
-            meta_info='placeholder for now',
-            source=self.__class__.__name__
-        )
-        # execute the side as it is 
-        self.publish_event(orderEvent)
+            strategy="tradecore",
+            type=order_type,
+            candle=order.current_candle,
+            meta_info=None,
+            source=self.__class__.__name__,
+        ))
         self._cleanup_closed_orders(order.get_instrument())
-        
-        
-        # since this is a an event based system, the sync flow is not expected in functions
-        
+
     def _handle_update_candle(self, event: CandleGenerated):
-        """Handle candle update events."""
-        if event.symbol in self._orders:
-            order = self._orders[event.symbol]
-            if order and  order.state == ORDERSTATE.OPEN:
-                self.update_candle(event.symbol, event)
+        order = self._orders.get(event.symbol)
+        if order and order.state == ORDERSTATE.OPEN:
+            order.set_current_candle(event)
 
     def _on_ltp_update(self, event: QuoteEvent):
-        """Handle LTP update events."""
-        if event.instrument in self._orders:
-            order = self._orders[event.instrument]
-            if order and order.state == ORDERSTATE.OPEN:
-                self.update_ltp(event)
+        order = self._orders.get(event.instrument)
+        if order and order.state == ORDERSTATE.OPEN:
+            self.update_ltp(event)
 
     def update_ltp(self, event: QuoteEvent):
-        """Update LTP and check for exits."""
-        if event.instrument not in self._orders:
-            return
-        order = self._orders[event.instrument]
+        order = self._orders.get(event.instrument)
         if not order or order.state != ORDERSTATE.OPEN:
             return
 
         exit_info = order.set_ltp(event.ltp, event.timestamp)
 
         if order.state == ORDERSTATE.CLOSE:
-            reason     = (exit_info or {}).get('exit_reason', 'UNKNOWN') if isinstance(exit_info, dict) else 'UNKNOWN'
-            exit_price = (exit_info or {}).get('exit_price', event.ltp)   if isinstance(exit_info, dict) else event.ltp
+            reason     = exit_info.get('exit_reason', 'UNKNOWN') if isinstance(exit_info, dict) else 'UNKNOWN'
+            exit_price = exit_info.get('exit_price', event.ltp)   if isinstance(exit_info, dict) else event.ltp
             self._order_logger.log_exit(order, reason, exit_price)
             del self._orders[event.instrument]
             self._logger.info(f"Order closed: {event.instrument}  reason={reason}")
 
         self._write_live_order_data()
-
 
     def update_candle(self, symbol: str, candle: CandleGenerated):
         if symbol in self._orders:
@@ -183,66 +136,45 @@ class OrderManager(Subscriber, Publisher):
         return self._orders.values()
 
     def on_entry_signal(self, event: EntrySignal):
-        """Handle entry signal events."""
         try:
-            # Process entry signal and place order
             self._handle_entry_signal(event)
-            
         except Exception as e:
             self._logger.error(f"Error handling entry signal: {e}")
-    
-    
+
     def _write_live_order_data(self):
-        """Write current live order data to JSON file for IPC with CLI dashboard."""
         try:
-            # Ensure data directory exists
             os.makedirs("data", exist_ok=True)
-            
             live_orders = []
-            
             for symbol, order in self._orders.items():
-                order_data = {
-                    "id": order.id,
-                    "symbol": symbol,
-                    "instrument": order.get_instrument(),
-                    "side": order.get_side(),
-                    "total_quantity": order.quantity,
-                    "entry_price": basic.round4(order.const_entry_price),
-                    "net_stop": order.net_zero_stop,
-                    "zero_stop": order.zero_stop,
-                    "loss_stop": order.loss_stop,
-                    "current_ltp": order.ltp,
+                live_orders.append({
+                    "id":                       order.id,
+                    "symbol":                   symbol,
+                    "instrument":               order.get_instrument(),
+                    "side":                     order.get_side(),
+                    "total_quantity":           order.quantity,
+                    "entry_price":              basic.round4(order.const_entry_price),
+                    "net_stop":                 order.net_zero_stop,
+                    "zero_stop":                order.zero_stop,
+                    "loss_stop":                order.loss_stop,
+                    "current_ltp":              order.ltp,
                     "current_profit_percentage": order.get_current_profit_percentage(),
-                    "current_profit": order.get_current_profit(),
-                    "trigger": order.trigger * 100,
-                    "retreat": order.get_retreat(),
-                    "max_move_percentage": order.get_max_move_percentage(),
-                    "min_move_percentage": order.get_min_move_percentage(),
-                    "entry_time": order.get_entry_time().isoformat() if order.get_entry_time() else None,
-                    "last_update": datetime.now().isoformat()
-                }
-                live_orders.append(order_data)
-            
-            # Write to IPC file
-            ipc_data = {
-                "timestamp": datetime.now().isoformat(),
-                "total_orders": len(live_orders),
-                "orders": live_orders
-            }
-            
-            with open("data/live_order.json", 'w') as f:
-                json.dump(ipc_data, f, indent=2)
-            
+                    "current_profit":           order.get_current_profit(),
+                    "trigger":                  order.trigger * 100,
+                    "retreat":                  order.get_retreat(),
+                    "max_move_percentage":      order.get_max_move_percentage(),
+                    "min_move_percentage":      order.get_min_move_percentage(),
+                    "entry_time":               order.get_entry_time().isoformat() if order.get_entry_time() else None,
+                    "last_update":              datetime.now().isoformat(),
+                })
+            tmp = self._live_order_file + ".tmp"
+            with open(tmp, 'w') as f:
+                json.dump({"timestamp": datetime.now().isoformat(), "total_orders": len(live_orders), "orders": live_orders}, f, indent=2)
+            os.replace(tmp, self._live_order_file)
         except Exception as e:
             self._logger.error(f"Error writing live order data: {e}")
-            import traceback
-            self._logger.error(f"Traceback: {traceback.format_exc()}")
-    
-    def _cleanup_closed_orders(self,symbol:str):
-        """Remove closed order for given symbol."""
+
+    def _cleanup_closed_orders(self, symbol: str):
         order = self._orders.get(symbol)
         if order and order.state == ORDERSTATE.CLOSE:
             del self._orders[symbol]
-            self._logger.info(f"Removed closed order for {symbol} from OrderManager.")
-        #TODO: log this order by event bus into order archives
-
+            self._logger.info(f"Removed closed order for {symbol}")

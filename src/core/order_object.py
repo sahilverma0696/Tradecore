@@ -6,123 +6,87 @@ from src.core.exit_manager import ExitManager
 from typing import Optional, Dict, Any
 import time
 import src.basic as basic
-from src.global_enum import *
+from src.global_enum import ORDERSTATE
+
 
 class OrderObject(Publisher):
-    '''
-    Data + Logic container, 
-    Contains the data 
-    Updates the data 
-    Has inbuild logic for exit management via ExitManager Event based ( stop loss in here )
-    '''
+    """Position state container. Delegates exit logic to ExitManager."""
+
     def __init__(self, name, instrument, trail, side, quantity, candle: CandleGenerated, loss_stop_low: float, loss_stop_high: float):
-        # no default values, the system expects to be having values from config
-        # else it fails
-        # basic information
         self.logger = get_logger(f"OrderObject-{name}")
-        self.id = int(time.time()) # unique id for each order, helps in ignoring redundant signals
+        self.id = int(time.time())
         self.const_name = name
         self.const_instrument = instrument
         self.state = ORDERSTATE.OPEN
-        self.const_side = side.upper()  # 'BUY' or 'SELL' #TODO: HANDLE AS ENUM
-        
+        self.const_side = side.upper()  # 'BUY' or 'SELL'
 
-        # information from config and is in steps
         self.quantity = quantity
         self.total_quantity = quantity
         self.filled_quantity = 0
         self.current_step_idx = 0
-        
-        # types of stops
-        # profit stop
-        self.trigger = trail   # trigger is a single percentage value in decimal ?, which triggers from min || max fall
-        
-        # entry price can be zero, this is normal
+
+        self.trigger = trail
+
         self.const_entry_price = candle.close
-        
-        #TODO: future release 
-        # profite stop, this will be triigered on some profit such that, trading fee is saved atleast 
-        # this is entry stop, in case the signal is not promising enough
-        self.zero_stop = 0  # to set as the entry price based on side, after 1 minute of entry
+
+        self.zero_stop = 0
         self.zero_stop_state = False
-        
-        #TODO: read from trading config, very important 
-        # this is loss stop, in case of direction switch, although at zero_stop should change the side of order so this should not be triggered, if this is triggered there is gap in system
+
         self.loss_stop_low = loss_stop_low
         self.loss_stop_high = loss_stop_high
         self.loss_stop = basic.round4(self.const_entry_price * (self.loss_stop_low if self.const_side == "BUY" else self.loss_stop_high))
 
-        
-        # net zero stop, to be set such that no loss happens
         self.net_zero_stop = 0
         self.net_zero_state = False
-        
-        # this works as the entry candle: gives the entry price, and then updated with every candle, for monitoring purpose
-        # this step will update by confimation from the executor for the market price on which entry actually happened
+
         self.current_candle: CandleGenerated = candle
-        
-        self.ltp = 0  # most important guy in the team
-                
-        # Initialize exit manager as a library
+
+        self.ltp = 0
+
         self.exit_manager = ExitManager(f"ExitManager-{name}")
 
-        
-        self.logger.debug(f"Creating OrderObject: {name}, Instrument: {instrument}, Side: {side}, Trail: {self.trigger}")
+        self.logger.debug(f"OrderObject created: {name}  instrument={instrument}  side={side}  trail={self.trigger}")
 
-        # Entry & timestamps
-
-        
-        self.const_entry_time = candle.timestamp # this will help in starting the zero_stop timer
+        self.const_entry_time = candle.timestamp
         self.last_update_time = self.const_entry_time
         self._timestamp = self.const_entry_time
 
-        # Price tracking
         self.min_price = self.const_entry_price
         self.max_price = self.const_entry_price
-        
-        # Performance tracking - now calculated via exit manager
+
         self.max_move_percentage = 0.0
         self.min_move_percentage = 0.0
         self.retreat = 0.0
         self.current_profit_percentage = 0.0
         self.current_profit = 0.0
-        
-    def _is_price_bounds(self,percentage: float) -> bool:
-        """Fast check if LTP is outside ±pct% of market_price."""
+
+    def _is_price_bounds(self, percentage: float) -> bool:
         diff = abs(self.ltp - self.const_entry_price)
         return diff > self.const_entry_price * percentage
 
     def _set_stops(self):
-        '''
-        Checks and sets the stops, such that they can be checked and triggered in exit manager
-        '''
-        if self.zero_stop_state == False and self._is_price_bounds(0.01):
+        if not self.zero_stop_state and self._is_price_bounds(0.01):
             self.zero_stop_state = True
             self.zero_stop = self.const_entry_price
-            
-        if self.net_zero_state == False and self._is_price_bounds(0.03):
+
+        if not self.net_zero_state and self._is_price_bounds(0.03):
             self.net_zero_state = True
             self.net_zero_stop = self.const_entry_price * (0.97 if self.const_side == "BUY" else 1.03)
 
-        
-
     def set_ltp(self, ltp, timestamp=None):
-        """Set LTP, check exits, return exit_info dict if triggered else None."""
+        """Set LTP, run exit checks. Returns exit_info dict if triggered, else None."""
         self.ltp = ltp
         self._set_stops()
         exit_info = self.exit_manager.check(self)
         if exit_info:
             self.state = ORDERSTATE.CLOSE
             return exit_info
-        else:
-            self._update_min_max_price(ltp)
-            self._update_performance_metrics()
-            self.last_update_time = timestamp or datetime.now()
-            self._timestamp = self.last_update_time
-
+        self._update_min_max_price(ltp)
+        self._update_performance_metrics()
+        self.last_update_time = timestamp or datetime.now()
+        self._timestamp = self.last_update_time
 
     def _get_order_state(self) -> Dict[str, Any]:
-        """Get current order state for exit manager."""
         return {
             'name': self.const_name,
             'side': self.const_side,
@@ -135,15 +99,11 @@ class OrderObject(Publisher):
             'quantity': self.quantity,
             'step': self.current_step_idx,
             'current_profit_percentage': self.current_profit_percentage,
-            'retreat': self.retreat
+            'retreat': self.retreat,
         }
 
     def _update_performance_metrics(self):
-        """Update performance metrics using exit manager calculations."""
-        order_state = self._get_order_state()
-        metrics = self.exit_manager.calculate_performance_metrics(order_state)
-        
-        # Update instance variables with calculated metrics
+        metrics = self.exit_manager.calculate_performance_metrics(self._get_order_state())
         self.current_profit = metrics['current_profit']
         self.current_profit_percentage = metrics['current_profit_percentage']
         self.max_move_percentage = max(self.max_move_percentage, metrics['max_move_percentage'])
@@ -159,16 +119,10 @@ class OrderObject(Publisher):
         if self.max_price == 0 or price > self.max_price:
             self.max_price = price
 
-
-    def get_current_trigger(self):
-        return self.trigger
-
+    def get_current_trigger(self): return self.trigger
     def get_current_step_idx(self): return self.current_step_idx
-    def get_current_step(self): return float('inf')  # no step config; step exit never triggers
+    def get_current_step(self): return float('inf')
     def get_current_quantity(self): return self.quantity
-    
-    
-    # ...existing code for all other getters...
     def get_entry_price(self): return self.const_entry_price
     def get_entry_time(self): return self.const_entry_time
     def get_min_price(self): return self.min_price

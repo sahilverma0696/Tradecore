@@ -1,4 +1,4 @@
-"""High-level wiring for VWAP trading system with thread pool management."""
+"""Tradecore — event-driven algorithmic trading engine."""
 import time
 import signal
 import sys
@@ -366,11 +366,11 @@ def shutdown_system(components, thread_manager):
             logger.error(f"   ❌ Error shutting down thread pools: {e}")
     
     logger.info("✅ System shutdown complete")
-    logger.info("👋 Thank you for using VWAP Trading System")
+    logger.info("👋 Tradecore shutdown complete")
 
 def main():
     """Main trading system entry point with proper architectural flow."""
-    logger.info("🚀 Starting VWAP Algorithmic Trading System...")
+    logger.info("🚀 Starting Tradecore...")
     
     # Set up signal handlers for graceful shutdown
     signal.signal(signal.SIGINT, signal_handler)

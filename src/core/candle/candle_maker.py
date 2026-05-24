@@ -1,16 +1,10 @@
-"""Simplified CandleMaker producing 5-minute VWAP candles with event bus."""
 import csv
 from datetime import datetime
 from collections import defaultdict
-from typing import Dict, Any  # Add missing imports
-from src.logger_factory import get_logger
+from typing import Dict, Any
 import os
-import traceback
+from src.logger_factory import get_logger
 from src.system_config_manager import SystemConfigManager
-
-
-# import pandas as pd
-# from src.core.plotting.live_chart_server import LiveChartServer
 from src.core.event_bus.mixins import Publisher, Subscriber
 from src.core.event_bus.events import QuoteEvent, CandleGenerated
 
@@ -34,8 +28,7 @@ class CandleMaker(Publisher, Subscriber):
         # ensure header
         if not os.path.exists(self._csv_file):
             with open(self._csv_file, 'w', newline='') as f:
-                writer = csv.writer(f)
-                writer.writerow(["timestamp", "inst", "name", "open", "high", "low", "close", "volume", "vwap"])
+                csv.writer(f).writerow(["timestamp", "symbol", "open", "high", "low", "close", "volume", "vwap"])
 
         self._logger.info(f"CandleMaker initialized with event bus, writing to {self._csv_file}")
         
@@ -119,17 +112,15 @@ class CandleMaker(Publisher, Subscriber):
         """Write candle data to CSV file."""
         try:
             with open(self._csv_file, 'a', newline='') as f:
-                writer = csv.writer(f)
-                writer.writerow([
+                csv.writer(f).writerow([
                     candle['timestamp'],
-                    candle.get('name', ''),
                     candle.get('name', ''),
                     candle['open'],
                     candle['high'],
                     candle['low'],
                     candle['close'],
                     candle['volume'],
-                    candle.get('vwap', 0.0)
+                    candle.get('vwap', 0.0),
                 ])
         except Exception as e:
             self._logger.error(f"Error writing candle to CSV: {e}")
@@ -139,7 +130,3 @@ class CandleMaker(Publisher, Subscriber):
         self._logger.info(f"Resetting VWAP for {inst}")
         self._vwap_data[inst] = {"cum_tp_vol": 0.0, "cum_vol": 0.0}
 
-    def register_plotting_handler(self):
-        """Initialize live chart server and subscribe to candle events."""
-        # Placeholder for future plotting functionality
-        self._logger.info("Plotting handler registration placeholder")

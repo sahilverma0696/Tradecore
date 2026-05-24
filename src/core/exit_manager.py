@@ -4,7 +4,7 @@ from src.core.event_bus.mixins import Publisher
 from src.logger_factory import get_logger
 from src.time_control import TimeChecker
 from src.config_manager import ConfigManager
-from src.global_enum import *
+from src.global_enum import ORDERSTATE
 if TYPE_CHECKING:
     from src.core.order_object import OrderObject
 
@@ -128,11 +128,8 @@ class ExitManager(Publisher):
 
     # ── Public API ───────────────────────────────────────────────────────────
 
-    def check(self, order: 'OrderObject') -> Optional[bool]:
-        """
-        Run all exit checks in priority order.
-        Publishes OrderEvent and returns True if an exit is triggered, else None.
-        """
+    def check(self, order: 'OrderObject') -> Optional[Dict[str, Any]]:
+        """Run all exit checks in priority order. Returns exit_info dict if triggered, else None."""
         exit_px, reason = self._check_hard_stop(order)
 
         if exit_px is None:
@@ -159,7 +156,7 @@ class ExitManager(Publisher):
             instrument=order.const_instrument,
             side=opposite_side,
             price=exit_px,
-            strategy='VWAP',
+            strategy='tradecore',
             type='FULL',
             candle=order.current_candle,
             meta_info={'exit_reason': reason, 'exit_price': exit_px},
