@@ -14,9 +14,11 @@
 Event-driven algorithmic trading engine. Streams live market data, aggregates ticks into OHLCV candles, fires entry signals from a pluggable strategy, manages positions with a peak-retrace exit algorithm, and logs all trade activity to CSV + SQLite.
 
 The entry strategy is swappable — VWAP cross is the default, but any signal generator that publishes `EntrySignal` integrates without touching the rest of the system.
+
 ---
 
-https://github.com/user-attachments/assets/6f547427-35ed-49e5-8fd6-72cd161f9eb6
+https://github.com/user-attachments/assets/b7594de0-1294-4ada-8084-fab8c07ffd0b
+
 
 ---
 
