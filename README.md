@@ -87,16 +87,37 @@ OrderEvent
 
 ## Installation
 
+### Docker (recommended)
+
+No Python installation needed.
+
+```bash
+git clone <repo-url>
+cd tradecore
+cp trading_config.example.json trading_config.json
+# edit trading_config.json with your API keys
+make docker-build
+make docker-up
+```
+
+The engine starts in the background. Open a dashboard in a second terminal:
+
+```bash
+make docker-cli    # order/P&L view
+make docker-sys    # system events view
+make docker-logs   # raw engine logs
+```
+
+Stop with `make docker-down`.
+
+### Local
+
 ```bash
 git clone <repo-url>
 cd tradecore
 pip install -r requirements.txt
-```
-
-**Copy the config template and fill in your credentials:**
-```bash
 cp trading_config.example.json trading_config.json
-# then edit trading_config.json with your API keys
+# edit trading_config.json with your API keys
 ```
 
 **macOS — SSL certificates (required for Binance WebSocket):**
