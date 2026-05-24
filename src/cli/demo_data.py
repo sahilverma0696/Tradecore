@@ -1,198 +1,152 @@
-"""Demo data generator for testing the dashboard."""
+"""Demo data generator — writes IPC files so the dashboard can display simulated trades."""
 
+import os
+import json
 import time
+import math
 import random
-import threading
-from datetime import datetime, timedelta
+from datetime import datetime
 
-from src.core.event_bus import EventBus, QuoteEvent, CandleGenerated, EntrySignal, ExitSignal, OrderExecuted
-from src.logger_factory import get_logger
+_SYMBOLS = ["NIFTY", "BANKNIFTY", "BTCUSDT"]
+_BASE_PRICES = {"NIFTY": 18500.0, "BANKNIFTY": 42000.0, "BTCUSDT": 65000.0}
+
+_QUOTE_FILE = "data/live_quotes.json"
+_CANDLE_FILE = "data/live_candles.json"
+_ORDER_FILE = "data/live_order.json"
+
+
+def _atomic_write(path: str, data):
+    os.makedirs("data", exist_ok=True)
+    tmp = path + ".tmp"
+    with open(tmp, "w") as f:
+        json.dump(data, f, indent=2)
+    os.replace(tmp, path)
 
 
 class DemoDataGenerator:
-    """Generates demo trading data for dashboard testing."""
-    
     def __init__(self):
-        self.event_bus = EventBus()
-        self.logger = get_logger("DemoDataGenerator")
-        self.symbols = ["NIFTY", "BANKNIFTY", "FINNIFTY", "RELIANCE", "TCS"]
-        self.base_prices = {
-            "NIFTY": 18500,
-            "BANKNIFTY": 42000,
-            "FINNIFTY": 19000,
-            "RELIANCE": 2400,
-            "TCS": 3800
-        }
-        self.current_prices = self.base_prices.copy()
+        self._prices = _BASE_PRICES.copy()
+        self._candles: dict = {}
+        self._orders: dict = {}
+        self._vwap_state: dict = {s: {"cum_tp_vol": 0.0, "cum_vol": 0.0} for s in _SYMBOLS}
+        self._tick = 0
         self.running = False
-        self.active_positions = {}
-        
+
     def start(self):
-        """Start generating demo data."""
         self.running = True
-        self.logger.info("Starting demo data generation...")
-        
-        # Start various data generation threads
-        threading.Thread(target=self._generate_quotes, daemon=True).start()
-        threading.Thread(target=self._generate_candles, daemon=True).start()
-        threading.Thread(target=self._generate_signals, daemon=True).start()
-        
+        while self.running:
+            self._tick += 1
+            self._step_prices()
+            self._write_quotes()
+            if self._tick % 10 == 0:
+                self._close_candles()
+            self._maybe_open_order()
+            self._update_orders()
+            self._write_orders()
+            time.sleep(0.5)
+
     def stop(self):
-        """Stop generating demo data."""
         self.running = False
-        self.logger.info("Stopped demo data generation")
-    
-    def _generate_quotes(self):
-        """Generate random quote data."""
-        while self.running:
-            for symbol in self.symbols:
-                # Random price movement
-                change_pct = random.uniform(-0.5, 0.5) / 100
-                new_price = self.current_prices[symbol] * (1 + change_pct)
-                self.current_prices[symbol] = new_price
-                
-                quote_event = QuoteEvent(
-                    timestamp=datetime.now(),
-                    source="DemoStreamer",
-                    symbol=symbol,
-                    instrument=random.randint(100000, 999999),
-                    ltp=new_price,
-                    volume=random.randint(1000, 50000),
-                    last_quantity=random.randint(1, 100),
-                    change=change_pct * 100,
-                    raw_data={"demo": True}
-                )
-                
-                self.event_bus.publish(quote_event)
-                
-            time.sleep(0.5)  # 500ms between quote updates
-    
-    def _generate_candles(self):
-        """Generate candle data."""
-        while self.running:
-            for symbol in self.symbols:
-                base_price = self.current_prices[symbol]
-                open_price = base_price * random.uniform(0.995, 1.005)
-                close_price = base_price * random.uniform(0.995, 1.005)
-                high_price = max(open_price, close_price) * random.uniform(1.0, 1.01)
-                low_price = min(open_price, close_price) * random.uniform(0.99, 1.0)
-                volume = random.randint(10000, 100000)
-                vwap = (high_price + low_price + close_price) / 3
-                
-                candle_data = {
-                    "timestamp": datetime.now(),
-                    "open": open_price,
-                    "high": high_price,
-                    "low": low_price,
-                    "close": close_price,
-                    "volume": volume,
-                    "vwap": vwap
+
+    def _step_prices(self):
+        for sym in _SYMBOLS:
+            drift = math.sin(self._tick * 0.05) * 0.001
+            noise = random.gauss(0, 0.002)
+            self._prices[sym] *= (1 + drift + noise)
+
+            ltp = self._prices[sym]
+            ltq = random.uniform(1, 50)
+            vd = self._vwap_state[sym]
+            vd["cum_tp_vol"] += ltp * ltq
+            vd["cum_vol"] += ltq
+
+            if sym not in self._candles:
+                self._candles[sym] = {"open": ltp, "high": ltp, "low": ltp, "close": ltp,
+                                      "volume": 0.0, "timestamp": datetime.now().isoformat()}
+            c = self._candles[sym]
+            c["high"] = max(c["high"], ltp)
+            c["low"] = min(c["low"], ltp)
+            c["close"] = ltp
+            c["volume"] += ltq
+            vwap = vd["cum_tp_vol"] / vd["cum_vol"] if vd["cum_vol"] else ltp
+            c["vwap"] = round(vwap, 4)
+            c["timeframe"] = "3"
+
+    def _write_quotes(self):
+        now = datetime.now().isoformat()
+        data = {
+            sym: {"ltp": round(self._prices[sym], 4), "ltq": round(random.uniform(1, 50), 2),
+                  "source": "DemoStreamer", "timestamp": now}
+            for sym in _SYMBOLS
+        }
+        _atomic_write(_QUOTE_FILE, data)
+
+    def _close_candles(self):
+        data = {}
+        for sym, c in self._candles.items():
+            data[sym] = {k: (round(v, 4) if isinstance(v, float) else v) for k, v in c.items()}
+        _atomic_write(_CANDLE_FILE, data)
+        for sym in _SYMBOLS:
+            ltp = self._prices[sym]
+            self._candles[sym] = {"open": ltp, "high": ltp, "low": ltp, "close": ltp,
+                                  "volume": 0.0, "timestamp": datetime.now().isoformat(), "timeframe": "3"}
+
+    def _maybe_open_order(self):
+        if len(self._orders) >= 2:
+            return
+        for sym in _SYMBOLS:
+            if sym not in self._orders and random.random() < 0.03:
+                side = random.choice(["BUY", "SELL"])
+                entry = self._prices[sym]
+                trail = 0.03
+                self._orders[sym] = {
+                    "id": int(time.time()),
+                    "symbol": sym, "instrument": sym, "side": side,
+                    "total_quantity": random.choice([25, 50, 75]),
+                    "entry_price": round(entry, 4),
+                    "loss_stop": round(entry * (0.98 if side == "BUY" else 1.02), 4),
+                    "zero_stop": 0.0, "net_stop": 0.0,
+                    "trigger": trail * 100,
+                    "entry_time": datetime.now().isoformat(),
+                    "_side": side, "_entry": entry,
                 }
-                
-                candle_event = CandleGenerated(
-                    timestamp=datetime.now(),
-                    source="DemoCandleMaker",
-                    symbol=symbol,
-                    candle_data=candle_data,
-                    timeframe="5m"
-                )
-                
-                self.event_bus.publish(candle_event)
-                
-            time.sleep(5)  # 5 seconds between candle updates
-    
-    def _generate_signals(self):
-        """Generate entry and exit signals."""
-        while self.running:
-            # Randomly generate entry signals
-            if random.random() < 0.1 and len(self.active_positions) < 3:  # 10% chance
-                symbol = random.choice(self.symbols)
-                if symbol not in self.active_positions:
-                    side = random.choice(["BUY", "SELL"])
-                    entry_price = self.current_prices[symbol]
-                    
-                    entry_event = EntrySignal(
-                        timestamp=datetime.now(),
-                        source="DemoStrategy",
-                        symbol=symbol,
-                        side=side,
-                        entry_price=entry_price,
-                        entry_vwap=entry_price * 0.999,
-                        quantity=random.choice([25, 50, 75, 100]),
-                        exit_steps=[(0.01, 0.5), (0.02, 0.5)],
-                        strategy_name="DemoStrategy",
-                        candle_data={"close": entry_price}
-                    )
-                    
-                    self.event_bus.publish(entry_event)
-                    self.active_positions[symbol] = {
-                        "entry_time": datetime.now(),
-                        "side": side,
-                        "entry_price": entry_price
-                    }
-                    
-                    # Generate order executed event
-                    order_event = OrderExecuted(
-                        timestamp=datetime.now(),
-                        source="DemoExecutioner",
-                        symbol=symbol,
-                        side=side,
-                        price=entry_price,
-                        quantity=entry_event.quantity,
-                        order_id=f"DEMO{random.randint(1000, 9999)}",
-                        execution_type="ENTRY"
-                    )
-                    self.event_bus.publish(order_event)
-            
-            # Randomly generate exit signals for active positions
-            for symbol in list(self.active_positions.keys()):
-                pos = self.active_positions[symbol]
-                age = datetime.now() - pos["entry_time"]
-                
-                # Exit after some time or randomly
-                if age > timedelta(seconds=30) or random.random() < 0.05:  # 5% chance or 30 seconds
-                    exit_price = self.current_prices[symbol]
-                    exit_reasons = ["STEP_1", "STEP_2", "TRAIL", "TIME", "MANUAL"]
-                    
-                    exit_event = ExitSignal(
-                        timestamp=datetime.now(),
-                        source="DemoExitManager",
-                        symbol=symbol,
-                        exit_price=exit_price,
-                        exit_reason=random.choice(exit_reasons),
-                        quantity=75
-                    )
-                    
-                    self.event_bus.publish(exit_event)
-                    
-                    # Generate order executed event
-                    order_event = OrderExecuted(
-                        timestamp=datetime.now(),
-                        source="DemoExecutioner",
-                        symbol=symbol,
-                        side="SELL" if pos["side"] == "BUY" else "BUY",
-                        price=exit_price,
-                        quantity=75,
-                        order_id=f"DEMO{random.randint(1000, 9999)}",
-                        execution_type="EXIT"
-                    )
-                    self.event_bus.publish(order_event)
-                    
-                    del self.active_positions[symbol]
-                    
-            time.sleep(2)  # Check every 2 seconds
+
+    def _update_orders(self):
+        to_close = []
+        for sym, o in self._orders.items():
+            ltp = self._prices[sym]
+            entry = o["_entry"]
+            side = o["_side"]
+            pnl = (ltp - entry) if side == "BUY" else (entry - ltp)
+            pnl_pct = pnl / entry * 100
+            max_pct = max(0.0, pnl_pct)
+            o.update({
+                "current_ltp": round(ltp, 4),
+                "current_profit": round(pnl * o["total_quantity"], 2),
+                "current_profit_percentage": round(pnl_pct, 4),
+                "max_move_percentage": round(max_pct, 4),
+                "min_move_percentage": round(min(0.0, pnl_pct), 4),
+                "retreat": round(max(0.0, max_pct - pnl_pct), 4),
+                "last_update": datetime.now().isoformat(),
+            })
+            if abs(pnl_pct) > 3.0 or random.random() < 0.005:
+                to_close.append(sym)
+        for sym in to_close:
+            del self._orders[sym]
+
+    def _write_orders(self):
+        orders = [{k: v for k, v in o.items() if not k.startswith("_")}
+                  for o in self._orders.values()]
+        _atomic_write(_ORDER_FILE, {"timestamp": datetime.now().isoformat(),
+                                    "total_orders": len(orders), "orders": orders})
 
 
 def start_demo_data_generator():
-    """Start the demo data generator."""
-    generator = DemoDataGenerator()
-    generator.start()
-    
+    gen = DemoDataGenerator()
     try:
-        while True:
-            time.sleep(1)
+        gen.start()
     except KeyboardInterrupt:
-        generator.stop()
+        gen.stop()
 
 
 if __name__ == "__main__":

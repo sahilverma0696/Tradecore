@@ -16,7 +16,7 @@ from src.logger_factory import get_logger
 
 def main():
     """Main CLI entry point."""
-    parser = argparse.ArgumentParser(description='VWAP Trading Dashboard')
+    parser = argparse.ArgumentParser(description='Tradecore Trading Dashboard')
     parser.add_argument('--no-curses', action='store_true', 
                        help='Use simple text dashboard instead of curses')
     parser.add_argument('--demo', action='store_true',
@@ -27,7 +27,7 @@ def main():
     args = parser.parse_args()
     
     logger = get_logger("CLI", console_output=True)
-    logger.info("Starting VWAP Trading Dashboard...")
+    logger.info("Starting Tradecore Trading Dashboard...")
     
     # CRITICAL: Initialize EventBus connection BEFORE creating dashboard
     if args.live:

@@ -29,7 +29,7 @@ _TYPE_COLOR = {
     "CandleGenerated": 3,   # yellow
     "EntrySignal":     1,   # green
     "OrderEvent":      2,   # red
-    "ExitSignal":      2,
+
     "FullQuoteEvent":  4,
 }
 
@@ -118,7 +118,7 @@ class SysDashboard:
             except Exception:
                 pass
 
-        title = (f" VWAP System Monitor  {datetime.now().strftime('%H:%M:%S')}  "
+        title = (f" Tradecore System Monitor  {datetime.now().strftime('%H:%M:%S')}  "
                  f"streamer:{streamer}  executor:{executor}  [q] quit ")
         self._safe(stdscr, row, 0, title.ljust(w), H | B)
         row += 1

@@ -1,11 +1,9 @@
 from .events import (
-    Event, 
-    QuoteEvent, 
+    Event,
+    QuoteEvent,
     CandleGenerated,
     EntrySignal,
-    ExitSignal,
-    OrderExecuted,
-    PositionUpdate
+    OrderEvent,
 )
 
 from .mixins import Publisher, Subscriber
@@ -13,13 +11,11 @@ from .event_bus import EventBus
 
 __all__ = [
     'Event',
-    'QuoteEvent', 
+    'QuoteEvent',
     'CandleGenerated',
-    'EntrySignal', 
-    'ExitSignal',
-    'OrderExecuted',
-    'PositionUpdate',
+    'EntrySignal',
+    'OrderEvent',
     'Publisher',
-    'Subscriber', 
-    'EventBus'
+    'Subscriber',
+    'EventBus',
 ]

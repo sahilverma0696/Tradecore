@@ -3,13 +3,13 @@
 
   "market_close_time": "15:30",
 
-  "trail": 0.03,
-  "loss_stop_low": 0.96,
-  "loss_stop_high": 1.06,
-
-  "step_pct": 2.0,
+  "step_pct":      2.0,
   "max_level_pct": 10.0,
-  "stoploss_pct": 2.0,
+  "stoploss_pct":  2.0,
+
+  "trail":          0.03,
+  "loss_stop_low":  0.96,
+  "loss_stop_high": 1.06,
 
   "default_quantity": 75,
   "quantities": {
@@ -26,18 +26,8 @@
   },
 
   "credentials": {
-    "zerodha": {
-      "api_key":      "",
-      "api_secret":   "",
-      "access_token": ""
-    },
-    "binance": {
-      "api_key":    "",
-      "api_secret": ""
-    },
-    "upstox": {
-      "api_key":      "",
-      "access_token": ""
-    }
+    "zerodha": { "api_key": "", "api_secret": "", "access_token": "" },
+    "binance": { "api_key": "", "api_secret": "" },
+    "upstox":  { "api_key": "", "access_token": "" }
   }
 }

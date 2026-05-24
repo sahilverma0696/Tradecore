@@ -5,8 +5,8 @@ from datetime import datetime
 from unittest.mock import Mock, patch
 
 from src.core.event_bus import (
-    EventBus, Event, CandleGenerated, 
-    EntrySignal, ExitSignal, Publisher, Subscriber, QuoteEvent
+    EventBus, Event, CandleGenerated,
+    EntrySignal, OrderEvent, Publisher, Subscriber, QuoteEvent
 )
 
 
@@ -401,9 +401,8 @@ class TestEventIntegration(unittest.TestCase):
         self.event_bus.subscribe(QuoteEvent, track_events)
         self.event_bus.subscribe(CandleGenerated, track_events)
         self.event_bus.subscribe(EntrySignal, track_events)
-        self.event_bus.subscribe(ExitSignal, track_events)
-        
-        # Simulate trading workflow
+        self.event_bus.subscribe(OrderEvent, track_events)
+
         # 1. Quote received
         quote = QuoteEvent(
             timestamp=datetime.now(),
@@ -431,7 +430,7 @@ class TestEventIntegration(unittest.TestCase):
         )
         self.event_bus.publish(candle)
 
-        # 3. Entry signal generated
+        # 3. Entry signal
         entry = EntrySignal(
             timestamp=datetime.now(),
             source="Strategy",
@@ -442,25 +441,20 @@ class TestEventIntegration(unittest.TestCase):
         )
         self.event_bus.publish(entry)
 
-        # 4. Exit signal generated
-        exit_signal = ExitSignal(
+        # 4. Order event (exit)
+        order_event = OrderEvent(
             timestamp=datetime.now(),
             source="ExitManager",
-            symbol="TEST",
-            direction="SELL",
+            order_id="1",
+            instrument="TEST",
+            side="SELL",
             price=101.0,
-            quantity=75,
-            exit_type="PROFIT",
+            strategy="tradecore",
+            type="FULL",
         )
-        self.event_bus.publish(exit_signal)
-        
-        # Verify workflow
-        expected_flow = [
-            "QuoteEvent",
-            "CandleGenerated", 
-            "EntrySignal",
-            "ExitSignal"
-        ]
+        self.event_bus.publish(order_event)
+
+        expected_flow = ["QuoteEvent", "CandleGenerated", "EntrySignal", "OrderEvent"]
         self.assertEqual(workflow_events, expected_flow)
 
 
