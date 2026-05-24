@@ -1,4 +1,7 @@
-.PHONY: run cli cli-simple sys test test-eventbus test-streamer test-executor clean
+.PHONY: run cli cli-simple sys test test-eventbus test-streamer test-executor clean \
+        docker-build docker-up docker-down docker-cli docker-sys docker-logs
+
+# ── Local ─────────────────────────────────────────────────────────────────────
 
 run:
 	python3 -m src.main
@@ -26,3 +29,23 @@ test-executor:
 
 clean:
 	bash scripts/clean_logs.sh
+
+# ── Docker ────────────────────────────────────────────────────────────────────
+
+docker-build:
+	docker compose build
+
+docker-up:
+	docker compose up -d
+
+docker-down:
+	docker compose down
+
+docker-cli:
+	docker compose exec engine python3 -m src.cli.cli_main --live --no-curses
+
+docker-sys:
+	docker compose exec engine python3 -m src.cli.sys_cli
+
+docker-logs:
+	docker compose logs -f engine

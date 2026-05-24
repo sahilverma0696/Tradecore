@@ -1,0 +1,11 @@
+services:
+  engine:
+    build: .
+    volumes:
+      - ./trading_config.json:/app/trading_config.json:ro
+      - ./system_config.json:/app/system_config.json:ro
+      - ./data:/app/data
+      - ./logs:/app/logs
+    restart: unless-stopped
+    environment:
+      - PYTHONUNBUFFERED=1

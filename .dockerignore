@@ -1,0 +1,12 @@
+__pycache__/
+*.py[cod]
+*.pyc
+.git/
+.claude/
+trading_config.json
+logs/
+data/
+*.db
+*.csv
+*.log
+.env
